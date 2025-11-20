@@ -4,6 +4,12 @@ const fs = require('node:fs');
 
 function spawnDownload(url, outdir = null) {
   return new Promise((resolve, reject) => {
+    // quick check for ffmpeg presence
+    const { spawnSync } = require('node:child_process');
+    const check = spawnSync('ffmpeg', ['-version']);
+    if (check.status !== 0) {
+      return reject(new Error('ffmpeg_not_found. Please install ffmpeg and ensure it is in PATH.'));
+    }
     const scriptPath = path.join(__dirname, '..', 'analysis', 'download.py');
     if (!fs.existsSync(scriptPath)) {
       return reject(new Error(`Python script not found at: ${scriptPath}`));
