@@ -29,6 +29,32 @@
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
+    /* 🎵 Music Theory Theme (Cyberpunk/Dark Mode Default) */
+    --music-kick: 190 90% 50%;      /* Cyan */
+    --music-snare: 300 90% 50%;     /* Fuchsia */
+    --music-tonic: 220 80% 20%;     /* Deep Blue */
+    --music-subdominant: 160 60% 20%; /* Deep Green */
+    --music-dominant: 0 70% 20%;    /* Deep Red */
+    --music-diminished: 270 50% 20%; /* Deep Purple */
+  }
+
+  /* Preset themes: `pop` (neon) and `jazz` (muted). Add class to body e.g. <body class="pop"> */
+  .pop-mode {
+    --music-kick: 190 95% 55%;
+    --music-snare: 310 95% 55%;
+    --music-tonic: 220 95% 30%;
+    --music-subdominant: 160 85% 28%;
+    --music-dominant: 6 95% 32%;
+    --music-diminished: 270 90% 35%;
+  }
+
+  .jazz-mode {
+    --music-kick: 190 20% 35%;
+    --music-snare: 300 30% 38%;
+    --music-tonic: 220 20% 18%;
+    --music-subdominant: 160 25% 18%;
+    --music-dominant: 10 20% 18%;
+    --music-diminished: 260 20% 20%;
   }
 
   .dark {
@@ -56,6 +82,13 @@
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
+    /* Music tones (Dark Mode defaults) */
+    --music-kick: 190 90% 50%;
+    --music-snare: 300 90% 50%; 
+    --music-tonic: 220 80% 20%;
+    --music-subdominant: 160 60% 20%;
+    --music-dominant: 0 70% 20%;
+    --music-diminished: 270 50% 20%;
   }
 }
 
@@ -67,4 +100,14 @@
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+}
+
+/* Subtle pulse for high-energy hits */
+@keyframes pulse-subtle {
+  0% { transform: translateY(0) scale(1); opacity: 1; }
+  50% { transform: translateY(-2px) scale(1.01); opacity: 0.95; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.animate-pulse-subtle {
+  animation: pulse-subtle 1s ease-in-out infinite;
 }

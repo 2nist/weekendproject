@@ -53,6 +53,21 @@ export default {
           "4": "hsl(var(--chart-4))",
           "5": "hsl(var(--chart-5))",
         },
+        // 🔴 NEW: Semantic Music Tokens
+        music: {
+          kick: {
+            DEFAULT: "hsl(var(--music-kick))",
+            glow: "hsl(var(--music-kick) / 0.3)",
+          },
+          snare: {
+            DEFAULT: "hsl(var(--music-snare))",
+            glow: "hsl(var(--music-snare) / 0.3)",
+          },
+          tonic: "hsl(var(--music-tonic))",
+          dominant: "hsl(var(--music-dominant))",
+          subdominant: "hsl(var(--music-subdominant))",
+          diminished: "hsl(var(--music-diminished))",
+        }
       },
     },
   },
