@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { sectionsToBlocks } from '../utils/architectBlocks';
+import YouTubeInput from './importer/YouTubeInput';
 import ProbabilityDashboard from './ProbabilityDashboard';
 
 /**
@@ -188,6 +189,22 @@ export default function AnalysisJobManager() {
             setAnalysisResult(analysisData);
             console.log('Analysis results set in state');
 
+            // Dispatch analysis data event for HarmonicGrid
+            if (analysisData?.linear_analysis || analysisData?.structural_map) {
+              window.dispatchEvent(new CustomEvent('analysis:data', {
+                detail: {
+                  linear_analysis: analysisData.linear_analysis,
+                  structural_map: analysisData.structural_map,
+                }
+              }));
+              // Also store in window for direct access
+              window.__lastAnalysisData = {
+                linear_analysis: analysisData.linear_analysis,
+                structural_map: analysisData.structural_map,
+              };
+              console.log('Analysis data dispatched for HarmonicGrid');
+            }
+
             if (!analysisData.linear_analysis || !analysisData.structural_map) {
               console.error('Analysis data missing required fields!', analysisData);
             }
@@ -236,6 +253,9 @@ export default function AnalysisJobManager() {
           >
             Select Audio File...
           </button>
+        </div>
+        <div style={{ marginTop: '12px' }}>
+          <YouTubeInput onFileReady={(path) => setFilePath(path)} />
         </div>
         {filePath && (
           <div style={{ marginTop: '10px', padding: '8px', backgroundColor: '#f0f0f0', borderRadius: '5px' }}>

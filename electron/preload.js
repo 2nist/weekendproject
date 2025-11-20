@@ -27,3 +27,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('DIALOG:SHOW_OPEN', options);
   },
 });
+
+// Backwards-compatible alias for convenience in renderer code
+contextBridge.exposeInMainWorld('electron', {
+  downloadYouTube: (url) => ipcRenderer.invoke('DOWNLOADER:DOWNLOAD', url),
+});
