@@ -5,6 +5,7 @@ import Connections from './pages/Connections';
 import Mapper from './pages/Mapper';
 import AnalysisJobManager from './components/AnalysisJobManager';
 import Toolbar from './components/Toolbar';
+import ThemeEditor from './components/settings/ThemeEditor';
 
 function App() {
   const [activeTab, setActiveTab] = React.useState('Architect');
@@ -76,6 +77,16 @@ function App() {
             >
               Analysis
             </button>
+            <button
+              onClick={() => setActiveTab('Settings')}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
+                activeTab === 'Settings'
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Settings
+            </button>
           </nav>
         </div>
       </header>
@@ -85,6 +96,7 @@ function App() {
         {activeTab === 'Connections' && <Connections />}
         {activeTab === 'Mapper' && <Mapper />}
         {activeTab === 'Analysis' && <AnalysisJobManager />}
+        {activeTab === 'Settings' && <ThemeEditor />}
       </div>
 
       <footer className="border-t border-border p-2.5">
