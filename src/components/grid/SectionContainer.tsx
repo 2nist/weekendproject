@@ -169,10 +169,8 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
                       harmonicVariant = 'diminished';
                     else harmonicVariant = 'default';
                   }
-                  const isKick = beat.beatIndex === 0 && beat.isAttack;
-                  const isSnare =
-                    (beat.beatIndex === 1 || beat.beatIndex === 3) &&
-                    beat.isAttack;
+                  const isKick = !!beat.drums?.hasKick;
+                  const isSnare = !!beat.drums?.hasSnare;
                   return (
                     <BeatCard
                       key={beat.id}

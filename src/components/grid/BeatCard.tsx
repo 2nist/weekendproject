@@ -82,6 +82,13 @@ export const BeatCard = ({
           {roman}
         </span>
       )}
+      {/* Drum indicators */}
+      {isKick && (
+        <span className="absolute bottom-2 left-2 w-2 h-2 rounded-full bg-music-kick shadow-[0_2px_6px_hsl(var(--music-kick)/0.4)]" />
+      )}
+      {isSnare && (
+        <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-music-snare shadow-[0_2px_6px_hsl(var(--music-snare)/0.4)]" />
+      )}
     </button>
   );
 };
