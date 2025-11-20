@@ -1,0 +1,2244 @@
+﻿* Structure-First Music Analysis Engine: Complete System Architecture
+1. Deep Structure JSON Schema
+json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Structure-First Music Analysis Schema",
+  "version": "1.0.0",
+  "type": "object",
+  "required": ["metadata", "linear_analysis", "structural_map", "arrangement_flow", "harmonic_context"],
+  
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "file_path": {"type": "string"},
+        "duration_seconds": {"type": "number"},
+        "sample_rate": {"type": "integer"},
+        "analysis_timestamp": {"type": "string", "format": "date-time"},
+        "engine_version": {"type": "string"},
+        "confidence_threshold": {"type": "number", "minimum": 0, "maximum": 1},
+        "tempo_hint": {"type": "number", "description": "External BPM override"},
+        "key_hint": {"type": "string", "description": "External key override"},
+        "metadata_sources": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    
+    "linear_analysis": {
+      "description": "Pass 1: Raw DSP output - 'The Listener'",
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["timestamp", "event_type", "confidence"],
+            "properties": {
+              "timestamp": {"type": "number", "description": "Time in seconds"},
+              "event_type": {"enum": ["note_onset", "transient", "chord_candidate", "beat", "downbeat"]},
+              
+              "note_data": {
+                "type": "object",
+                "properties": {
+                  "pitch_hz": {"type": "number"},
+                  "midi_note": {"type": "integer", "minimum": 0, "maximum": 127},
+                  "note_name": {"type": "string", "pattern": "^[A-G][#b]?[0-9]$"},
+                  "velocity": {"type": "number", "minimum": 0, "maximum": 1},
+                  "duration": {"type": "number"}
+                }
+              },
+              
+              "chord_candidate": {
+                "type": "object",
+                "properties": {
+                  "root_candidates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "root": {"type": "string"},
+                        "probability": {"type": "number", "minimum": 0, "maximum": 1}
+                      }
+                    }
+                  },
+                  "quality_candidates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "quality": {"enum": ["major", "minor", "diminished", "augmented", "sus2", "sus4", "dominant7", "major7", "minor7", "dim7", "half-dim7"]},
+                        "probability": {"type": "number"}
+                      }
+                    }
+                  },
+                  "bass_note": {"type": "string"},
+                  "bass_ambiguity_flag": {"type": "boolean"}
+                }
+              },
+              
+              "spectral_data": {
+                "type": "object",
+                "properties": {
+                  "dominant_frequencies": {"type": "array", "items": {"type": "number"}},
+                  "spectral_centroid": {"type": "number"},
+                  "spectral_rolloff": {"type": "number"},
+                  "zero_crossing_rate": {"type": "number"}
+                }
+              },
+              
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "DSP confidence before theory correction"
+              },
+              
+              "ambiguity_flags": {
+                "type": "array",
+                "items": {"enum": ["weak_fundamental", "inharmonicity", "polyphonic_blur", "bass_octave_error", "overtone_masking"]}
+              }
+            }
+          }
+        },
+        
+        "beat_grid": {
+          "type": "object",
+          "properties": {
+            "tempo_bpm": {"type": "number"},
+            "tempo_stability": {"type": "number", "minimum": 0, "maximum": 1},
+            "beat_timestamps": {"type": "array", "items": {"type": "number"}},
+            "downbeat_timestamps": {"type": "array", "items": {"type": "number"}},
+            "tempo_variations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "start_time": {"type": "number"},
+                  "end_time": {"type": "number"},
+                  "bpm": {"type": "number"},
+                  "confidence": {"type": "number"}
+                }
+              }
+            }
+          }
+        },
+
+        "semantic_features": {
+          "type": "object",
+          "description": "Per-frame descriptors used for semantic labeling",
+          "properties": {
+            "frame_stride_seconds": {"type": "number"},
+            "feature_version": {"type": "string"},
+            "frames": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "timestamp": {"type": "number"},
+                  "rms": {"type": "number"},
+                  "spectral_flux": {"type": "number"},
+                  "chroma_entropy": {"type": "number"},
+                  "has_vocals": {"type": "boolean"},
+                  "rms_delta": {"type": "number"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    
+    "structural_map": {
+      "description": "Pass 2: Hierarchical song sections - 'The Architect'",
+      "type": "object",
+      "properties": {
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["section_id", "section_label", "harmonic_dna", "rhythmic_dna"],
+            "properties": {
+              "section_id": {"type": "string", "pattern": "^SECTION_[A-Z][0-9]*$"},
+              "section_label": {"enum": ["intro", "verse", "chorus", "bridge", "pre-chorus", "post-chorus", "interlude", "outro", "solo", "breakdown"]},
+              "section_variant": {"type": "integer", "description": "e.g., Verse 1, Verse 2"},
+              
+              "time_range": {
+                "type": "object",
+                "properties": {
+                  "start_time": {"type": "number"},
+                  "end_time": {"type": "number"},
+                  "duration_bars": {"type": "number"}
+                }
+              },
+              
+              "harmonic_dna": {
+                "type": "object",
+                "description": "The unique harmonic identity of this section",
+                "properties": {
+                  "progression": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["chord", "duration_beats", "probability_score", "theory_justification"],
+                      "properties": {
+                        "chord": {
+                          "type": "object",
+                          "properties": {
+                            "root": {"type": "string"},
+                            "quality": {"type": "string"},
+                            "extensions": {
+                              "type": "array",
+                              "items": {"enum": ["b9", "9", "#9", "11", "#11", "b13", "13"]},
+                              "description": "Jazz/Neo-Soul extensions"
+                            },
+                            "alterations": {
+                              "type": "array",
+                              "items": {"enum": ["b5", "#5", "b9", "#9", "#11"]},
+                              "description": "Altered dominant specifications"
+                            },
+                            "voicing": {
+                              "type": "object",
+                              "properties": {
+                                "type": {"enum": ["root_position", "first_inversion", "second_inversion", "third_inversion", "drop2", "drop3", "quartal", "cluster"]},
+                                "bass_note": {"type": "string"},
+                                "chord_tones": {"type": "array", "items": {"type": "string"}},
+                                "voicing_density": {"enum": ["open", "close", "spread"]}
+                              }
+                            },
+                            "slash_bass": {"type": "string", "description": "e.g., D7/F# for secondary dominant"}
+                          }
+                        },
+                        
+                        "duration_beats": {"type": "number"},
+                        "position_in_bar": {"type": "number"},
+                        
+                        "probability_score": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1,
+                          "description": "Post-correction confidence"
+                        },
+                        
+                        "raw_probability": {
+                          "type": "number",
+                          "description": "Original DSP confidence before correction"
+                        },
+                        
+                        "theory_justification": {
+                          "type": "object",
+                          "required": ["correction_applied", "reasoning"],
+                          "properties": {
+                            "correction_applied": {"type": "boolean"},
+                            "original_chord": {"type": "string"},
+                            "corrected_chord": {"type": "string"},
+                            "reasoning": {"type": "string"},
+                            "rules_applied": {
+                              "type": "array",
+                              "items": {"enum": [
+                                "functional_harmony_tonic",
+                                "functional_harmony_predominant", 
+                                "functional_harmony_dominant",
+                                "secondary_dominant",
+                                "modal_interchange",
+                                "chromatic_mediant",
+                                "deceptive_cadence",
+                                "authentic_cadence",
+                                "plagal_cadence",
+                                "bass_note_disambiguation",
+                                "genre_probability",
+                                "voice_leading_smoothness",
+                                "harmonic_rhythm_consistency"
+                              ]}
+                            },
+                            "genre_weight": {"type": "number", "description": "How much genre influenced the decision"}
+                          }
+                        },
+                        
+                        "functional_analysis": {
+                          "type": "object",
+                          "properties": {
+                            "roman_numeral": {"type": "string"},
+                            "scale_degree": {"type": "integer", "minimum": 1, "maximum": 7},
+                            "function": {"enum": ["tonic", "predominant", "dominant", "mediant", "submediant"]},
+                            "cadence_point": {"enum": ["authentic", "half", "deceptive", "plagal", "none"]},
+                            "tonicization_target": {"type": "string"}
+                          }
+                        }
+                      }
+                    }
+                  },
+                  
+                  "key_center": {"type": "string"},
+                  "mode": {"enum": ["ionian", "dorian", "phrygian", "lydian", "mixolydian", "aeolian", "locrian", "harmonic_minor", "melodic_minor", "blues", "pentatonic"]},
+                  "harmonic_rhythm": {"type": "string", "description": "e.g., '1 chord per bar', '2 chords per bar'"},
+                  "characteristic_moves": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "e.g., 'IV-V motion', 'bVII substitution'"
+                  }
+                }
+              },
+              
+              "rhythmic_dna": {
+                "$ref": "#/definitions/rhythmic_dna"
+              },
+              "semantic_signature": {
+                "type": "object",
+                "description": "Feature vector describing structural role",
+                "properties": {
+                  "repetition_score": {"type": "number"},
+                  "repetition_count": {"type": "integer"},
+                  "avg_rms": {"type": "number"},
+                  "max_rms": {"type": "number"},
+                  "spectral_flux_mean": {"type": "number"},
+                  "spectral_flux_trend": {"type": "number"},
+                  "chroma_entropy_mean": {"type": "number"},
+                  "vocal_ratio": {"type": "number"},
+                  "has_vocals": {"type": "boolean"},
+                  "energy_slope": {"type": "number"},
+                  "harmonic_stability": {"type": "number"},
+                  "harmonic_variety": {"type": "number"},
+                  "chord_unique": {"type": "integer"},
+                  "chord_total": {"type": "integer"},
+                  "duration_seconds": {"type": "number"},
+                  "duration_bars": {"type": "number"},
+                  "position_ratio": {"type": "number"},
+                  "is_unique": {"type": "boolean"},
+                  "semantic_label": {
+                    "type": "object",
+                    "properties": {
+                      "label": {"type": "string"},
+                      "confidence": {"type": "number"},
+                      "reason": {"type": "string"}
+                    }
+                  }
+                }
+              },
+              
+              "melodic_contour": {
+                "type": "object",
+                "properties": {
+                  "range_semitones": {"type": "integer"},
+                  "average_pitch": {"type": "number"},
+                  "contour_shape": {"enum": ["ascending", "descending", "arch", "valley", "static", "stepwise", "leaping"]},
+                  "motifs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "interval_sequence": {"type": "array", "items": {"type": "integer"}},
+                        "rhythm_pattern": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              },
+              
+              "similarity_matrix": {
+                "type": "object",
+                "description": "Self-similarity data used for section identification",
+                "properties": {
+                  "method": {"enum": ["chromagram", "mfcc", "chroma_cens", "tonnetz"]},
+                  "similarity_scores": {"type": "array", "items": {"type": "number"}},
+                  "repetition_indices": {"type": "array", "items": {"type": "integer"}}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    
+    "arrangement_flow": {
+      "description": "Pass 3: Song assembly using structural blocks",
+      "type": "object",
+      "properties": {
+        "form": {"type": "string", "description": "e.g., 'AABA', 'Verse-Chorus', 'Through-composed'"},
+        "timeline": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "position": {"type": "integer"},
+              "section_reference": {"type": "string", "description": "References section_id from structural_map"},
+              "start_time": {"type": "number"},
+              "end_time": {"type": "number"},
+              "variations": {
+                "type": "array",
+                "items": {"enum": ["instrumentation_change", "dynamic_shift", "harmonic_variation", "rhythmic_variation", "extended_ending"]}
+              }
+            }
+          }
+        },
+        "transitions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from_section": {"type": "string"},
+              "to_section": {"type": "string"},
+              "transition_time": {"type": "number"},
+              "transition_type": {"enum": ["direct", "drum_fill", "riser", "break", "modulation", "ritardando", "fermata"]},
+              "modulation": {
+                "type": "object",
+                "properties": {
+                  "from_key": {"type": "string"},
+                  "to_key": {"type": "string"},
+                  "modulation_type": {"enum": ["direct", "pivot_chord", "common_tone", "chromatic"]}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    
+    "harmonic_context": {
+      "description": "Global harmonic analysis - 'The Theorist'",
+      "type": "object",
+      "properties": {
+        "global_key": {
+          "type": "object",
+          "properties": {
+            "primary_key": {"type": "string"},
+            "mode": {"type": "string"},
+            "confidence": {"type": "number"}
+          }
+        },
+        
+        "modulations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "timestamp": {"type": "number"},
+              "from_key": {"type": "string"},
+              "to_key": {"type": "string"},
+              "modulation_technique": {"type": "string"},
+              "probability_score": {"type": "number"},
+              "theory_justification": {"type": "string"}
+            }
+          }
+        },
+        
+        "borrowed_chords": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "timestamp": {"type": "number"},
+              "chord": {"type": "string"},
+              "borrowed_from": {"type": "string", "description": "e.g., 'parallel minor'"},
+              "theory_justification": {"type": "string"}
+            }
+          }
+        },
+        
+        "genre_profile": {
+          "type": "object",
+          "properties": {
+            "detected_genre": {"type": "string"},
+            "confidence": {"type": "number"},
+            "genre_constraints": {
+              "type": "object",
+              "properties": {
+                "common_progressions": {"type": "array", "items": {"type": "string"}},
+                "allowed_extensions": {"type": "array", "items": {"type": "string"}},
+                "forbidden_moves": {"type": "array", "items": {"type": "string"}},
+                "cadence_preferences": {"type": "object"}
+              }
+            }
+          }
+        },
+        
+        "functional_summary": {
+          "type": "object",
+          "properties": {
+            "predominant_usage": {"type": "number", "description": "Percentage of predominant function chords"},
+            "dominant_usage": {"type": "number"},
+            "tonic_usage": {"type": "number"},
+            "chromatic_density": {"type": "number", "description": "Percentage of non-diatonic chords"}
+          }
+        }
+      }
+    },
+    
+    "polyrhythmic_layers": {
+      "description": "Superimposed time signatures and polyrhythms",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "layer_id": {"type": "string"},
+          "time_range": {
+            "type": "object",
+            "properties": {
+              "start_time": {"type": "number"},
+              "end_time": {"type": "number"}
+            }
+          },
+          "primary_meter": {"$ref": "#/definitions/rhythmic_dna"},
+          "secondary_meter": {"$ref": "#/definitions/rhythmic_dna"},
+          "polyrhythm_ratio": {"type": "string", "description": "e.g., '3:2', '4:3'"},
+          "composite_feel": {"type": "string", "description": "How the layers interact"},
+          "theory_justification": {"type": "string"}
+        }
+      }
+    }
+  },
+  
+  "definitions": {
+    "rhythmic_dna": {
+      "type": "object",
+      "description": "Comprehensive rhythm representation beyond time signature",
+      "required": ["pulse_pattern", "macrobeat_structure", "microbeat_base"],
+      "properties": {
+        "time_signature": {
+          "type": "object",
+          "properties": {
+            "numerator": {"type": "integer"},
+            "denominator": {"type": "integer"}
+          }
+        },
+        
+        "pulse_pattern": {
+          "type": "array",
+          "items": {"type": "integer"},
+          "description": "Additive rhythm grouping (2s and 3s). E.g., [2,2,3] for 7/8, [3,3,2] for tresillo",
+          "examples": [
+            [2, 3],
+            [2, 2, 3],
+            [3, 2, 2],
+            [2, 2, 2, 3],
+            [2, 2, 3, 2, 2]
+          ]
+        },
+        
+        "mnemonic_syllables": {
+          "type": "string",
+          "description": "Apple/Galloping system for performance",
+          "examples": ["apple galloping", "apple apple galloping", "galloping apple apple"]
+        },
+        
+        "macrobeat_structure": {
+          "type": "object",
+          "description": "Tempo/pulse level - what you tap your foot to",
+          "properties": {
+            "tempo_bpm": {"type": "number"},
+            "macrobeats_per_bar": {"type": "integer"},
+            "macrobeat_feel": {"enum": ["even", "swung", "shuffled", "asymmetric"]},
+            "backbeat_pattern": {
+              "type": "array",
+              "items": {"type": "integer"},
+              "description": "Which beats are accented (e.g., [2,4] for standard rock)"
+            }
+          }
+        },
+        
+        "microbeat_base": {
+          "type": "object",
+          "description": "Subdivision level - establishes rhythmic feel",
+          "properties": {
+            "division_type": {"enum": ["binary", "ternary", "quintuplet", "septuplet"]},
+            "microbeats_per_macrobeat": {"type": "integer"},
+            "partition": {
+              "type": "string",
+              "description": "e.g., 'P=3+2+2' for 7 subdivisions, 'P=2+2+2+3' for 9",
+              "examples": ["P=2+2", "P=2+3", "P=2+2+3", "P=3+3+2"]
+            },
+            "swing_ratio": {
+              "type": "number",
+              "description": "For swung feels: 1.0 = straight, 1.5 = triplet swing, 2.0 = extreme swing",
+              "minimum": 1.0,
+              "maximum": 2.0
+            }
+          }
+        },
+        
+        "groove_descriptor": {
+          "type": "object",
+          "properties": {
+            "groove_name": {"type": "string", "examples": ["son clave", "rumba clave", "bossa nova", "bembe", "balkan rachenitsa"]},
+            "characteristic_pattern": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "onset": {"type": "number", "description": "Position in cycle"},
+                  "accent": {"enum": ["primary", "secondary", "tertiary", "ghost"]},
+                  "duration": {"type": "number"}
+                }
+              }
+            },
+            "complement_pattern": {
+              "type": "array",
+              "description": "Interlocking/toggle rhythm - fills the gaps"
+            }
+          }
+        },
+        
+        "rhythmic_motifs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "motif_id": {"type": "string"},
+              "partition_notation": {"type": "string", "description": "e.g., '3+3+2' for tresillo"},
+              "graphic_notation": {"type": "string", "description": "• = onset, – = rest", "example": "•––•––•–"},
+              "permutation_mode": {"type": "integer", "description": "Which rotation of the partition"},
+              "repetitions": {"type": "integer"},
+              "displacement": {"type": "integer", "description": "Metric position shift for tension"}
+            }
+          }
+        },
+        
+        "hemiola": {
+          "type": "object",
+          "description": "3:2 ratios at the metric level",
+          "properties": {
+            "present": {"type": "boolean"},
+            "pattern": {"type": "string", "description": "e.g., '3 in space of 2' or '2 in space of 3'"},
+            "start_bar": {"type": "integer"},
+            "duration_bars": {"type": "integer"}
+          }
+        },
+        
+        "tuplet_specifications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tuplet_ratio": {"type": "string", "examples": ["3:2", "5:4", "7:4", "9:8"]},
+              "position": {"type": "number"},
+              "duration": {"type": "number"}
+            }
+          }
+        },
+        
+        "cyclic_length": {
+          "type": "integer",
+          "description": "Length of repeating rhythmic cycle in microbeats (e.g., 8 for basic 4/4, 16 for clave)"
+        },
+        
+        "onset_positions": {
+          "type": "array",
+          "items": {"type": "number"},
+          "description": "Exact microbeat positions of all onsets in the pattern"
+        },
+        
+        "euclidean_algorithm": {
+          "type": "object",
+          "description": "For maximum evenness rhythm distribution",
+          "properties": {
+            "k_onsets": {"type": "integer"},
+            "n_total_positions": {"type": "integer"},
+            "rotation": {"type": "integer"}
+          }
+        },
+        
+        "genre_specific_feel": {
+          "type": "object",
+          "properties": {
+            "microtiming_profile": {"type": "string", "description": "Where notes fall relative to grid"},
+            "ghost_note_pattern": {"type": "array"},
+            "accent_pattern_cultural_origin": {"type": "string", "examples": ["Balkan", "Cuban", "Brazilian", "West African", "Indian"]}
+          }
+        }
+      }
+    }
+  }
+}
+________________
+
+
+2. Theory Logic Pseudocode
+python
+def resolve_progression(raw_chords, genre_profile, key_context, section_type):
+    """
+    Pass 3: Apply music theory to correct audio analysis errors
+    
+    Args:
+        raw_chords: List of chord candidates from DSP with confidence scores
+        genre_profile: Genre constraints and probability weights
+        key_context: Global/local key information
+        section_type: "verse", "chorus", etc. (affects harmonic expectations)
+    
+    Returns:
+        corrected_progression: Theory-justified chord sequence
+    """
+    
+    corrected_progression = []
+    
+    for i, raw_chord in enumerate(raw_chords):
+        correction_context = {
+            'original': raw_chord,
+            'position': i,
+            'neighbors': get_neighbor_chords(raw_chords, i),
+            'probability': raw_chord.confidence,
+            'corrected': None,
+            'justification': []
+        }
+        
+        # RULE 1: Bass Note Disambiguation
+        if raw_chord.has_flag('bass_ambiguity'):
+            correction_context = apply_bass_disambiguation(
+                raw_chord, 
+                key_context, 
+                correction_context
+            )
+            # Example: Audio hears "C-E-G-A-D" with D in bass
+            # Could be D-something OR C6 with D in bass
+            # Check: Is this a predominant function position?
+            # If yes -> D-something (likely Dmin7 in C major)
+            # If no, and it's resolving to G -> C6 more likely
+        
+        # RULE 2: Functional Harmony Correction
+        expected_function = get_expected_function(i, section_type, key_context)
+        
+        if expected_function == 'DOMINANT':
+            if not is_dominant_quality(raw_chord):
+                # Audio heard Bmin but we're at a dominant position
+                candidates = [
+                    {'chord': 'G7', 'reason': 'V7 in C major', 'weight': 0.9},
+                    {'chord': 'Bm7b5', 'reason': 'vii°7 in C major', 'weight': 0.7},
+                    {'chord': 'D7', 'reason': 'V7/V (secondary dominant)', 'weight': 0.6}
+                ]
+                
+                # Check bass note
+                if raw_chord.bass_note in ['G', 'B', 'D', 'F']:
+                    best_match = find_best_bass_match(candidates, raw_chord.bass_note)
+                    correction_context.corrected = best_match
+                    correction_context.justification.append({
+                        'rule': 'functional_harmony_dominant',
+                        'reasoning': f"Position {i} expects dominant function. Bass note {raw_chord.bass_note} suggests {best_match}"
+                    })
+        
+        elif expected_function == 'PREDOMINANT':
+            # Common error: F# heard instead of F in C major
+            # Audio artifact: The #11 of F or overtones create ambiguity
+            if raw_chord.root in ['F#', 'Gb'] and key_context.is_diatonic('F'):
+                if genre_profile.name == 'POP' and genre_profile.weights['secondary_dominants'] < 0.3:
+                    # Pop rarely uses secondary dominants
+                    correction_context.corrected = build_chord('F', 'major', bass='F')
+                    correction_context.justification.append({
+                        'rule': 'genre_probability',
+                        'reasoning': 'Pop genre rarely uses F#. Corrected to F (IV) as predominant.',
+                        'genre_weight': 0.85
+                    })
+                else:
+                    # Jazz/sophisticated pop might use D7/F# (V7/V)
+                    correction_context.corrected = build_chord('D', 'dominant7', bass='F#')
+                    correction_context.justification.append({
+                        'rule': 'secondary_dominant',
+                        'reasoning': 'D7/F# (V7/V) as chromatic predominant. Genre supports this.',
+                        'genre_weight': 0.6
+                    })
+        
+        # RULE 3: Cadence Detection & Enforcement
+        if i >= len(raw_chords) - 2:  # Near end of phrase
+            cadence_type = detect_cadence_context(raw_chords[i-1:], key_context)
+            
+            if cadence_type == 'AUTHENTIC_EXPECTED':
+                # Last chord MUST be tonic
+                if not is_tonic_chord(raw_chord, key_context):
+                    correction_context.corrected = build_tonic_chord(key_context)
+                    correction_context.justification.append({
+                        'rule': 'authentic_cadence',
+                        'reasoning': f'End of phrase in {section_type}. Enforcing V->I resolution.',
+                        'raw_probability': raw_chord.confidence,
+                        'corrected_probability': 0.95
+                    })
+        
+        # RULE 4: Voice Leading Smoothness
+        if i > 0:
+            prev_chord = corrected_progression[-1]['chord']
+            voice_leading_cost = calculate_voice_leading(prev_chord, raw_chord)
+            
+            if voice_leading_cost > THRESHOLD:
+                # Large melodic leaps suggest an error
+                alternate_candidates = find_smoother_alternatives(
+                    prev_chord, 
+                    raw_chord, 
+                    key_context
+                )
+                
+                for candidate in alternate_candidates:
+                    if candidate.voice_leading_cost < voice_leading_cost * 0.5:
+                        correction_context.corrected = candidate.chord
+                        correction_context.justification.append({
+                            'rule': 'voice_leading_smoothness',
+                            'reasoning': f'Original voice leading cost: {voice_leading_cost}. Smoother option: {candidate.chord}',
+                            'cost_reduction': voice_leading_cost - candidate.voice_leading_cost
+                        })
+                        break
+        
+        # RULE 5: Harmonic Rhythm Consistency
+        section_harmonic_rhythm = get_section_harmonic_rhythm(section_type, genre_profile)
+        
+        if raw_chord.duration < section_harmonic_rhythm.min_duration:
+            # Possible false positive - too fast chord change
+            if raw_chord.confidence < 0.7:
+                # Merge with previous or next chord
+                correction_context.corrected = None  # Flag for deletion
+                correction_context.justification.append({
+                    'rule': 'harmonic_rhythm_consistency',
+                    'reasoning': f'Chord change too rapid ({raw_chord.duration}s). Likely artifact. Merged with neighbor.'
+                })
+        
+        # RULE 6: Modal Interchange vs. Error
+        if is_non_diatonic(raw_chord, key_context):
+            # Is this intentional (modal interchange) or an error?
+            
+            # Check: Common borrowed chords in genre?
+            if raw_chord.root in genre_profile.common_borrowed_chords:
+                # Likely intentional - keep it
+                correction_context.corrected = raw_chord
+                correction_context.justification.append({
+                    'rule': 'modal_interchange',
+                    'reasoning': f'{raw_chord} is common borrowed chord in {genre_profile.name}',
+                    'borrowed_from': get_source_mode(raw_chord, key_context)
+                })
+            
+            else:
+                # Suspicious - check if diatonic alternative has better bass
+                diatonic_alternative = find_diatonic_alternative(raw_chord, key_context)
+                
+                if diatonic_alternative.bass_match > raw_chord.bass_match:
+                    correction_context.corrected = diatonic_alternative
+                    correction_context.justification.append({
+                        'rule': 'bass_note_disambiguation',
+                        'reasoning': f'Non-diatonic {raw_chord} corrected to {diatonic_alternative}. Bass note match superior.'
+                    })
+        
+        # RULE 7: Genre-Specific Extensions
+        if genre_profile.name in ['JAZZ', 'NEO_SOUL', 'R&B']:
+            # Upgrade basic triads to extended chords in appropriate contexts
+            if raw_chord.quality in ['major', 'minor'] and raw_chord.extensions == []:
+                if correction_context['position'] % 4 == 0:  # Downbeat
+                    # Add 7th at minimum
+                    enhanced_chord = add_seventh(raw_chord, key_context)
+                    
+                    # Check for 9th in soprano
+                    if has_ninth_in_melody(raw_chord, section_melodic_data):
+                        enhanced_chord = add_extension(enhanced_chord, '9')
+                    
+                    correction_context.corrected = enhanced_chord
+                    correction_context.justification.append({
+                        'rule': 'genre_extension',
+                        'reasoning': f'Jazz/Neo-Soul context. Enhanced {raw_chord} to {enhanced_chord}',
+                        'genre_weight': 0.7
+                    })
+        
+        # Finalize correction
+        if correction_context.corrected is not None:
+            final_chord = correction_context.corrected
+        else:
+            final_chord = raw_chord
+        
+        # Calculate post-correction probability
+        final_probability = calculate_final_probability(
+            raw_chord.confidence,
+            correction_context.justification,
+            genre_profile
+        )
+        
+        corrected_progression.append({
+            'chord': final_chord,
+            'duration_beats': raw_chord.duration_beats,
+            'position_in_bar': raw_chord.position,
+            'probability_score': final_probability,
+            'raw_probability': raw_chord.confidence,
+            'theory_justification': correction_context.justification
+        })
+    
+    return corrected_progression
+
+
+
+
+# Supporting Functions
+
+
+def apply_bass_disambiguation(raw_chord, key_context, correction_context):
+    """Resolve bass note octave errors and slash chord ambiguities"""
+    
+    bass = raw_chord.bass_note
+    chord_tones = raw_chord.chord_tones
+    
+    # Check if bass is also a chord tone
+    if bass in chord_tones:
+        # Simple inversion
+        return build_inversion(raw_chord, bass)
+    else:
+        # Potential slash chord - is bass a scale degree?
+        if is_scale_degree(bass, key_context):
+            # Could be legitimate slash chord
+            # Check function: Is this a passing tone context?
+            if is_passing_bass_context(raw_chord, key_context):
+                correction_context.justification.append({
+                    'rule': 'bass_note_disambiguation',
+                    'reasoning': f'Bass {bass} is passing tone under {raw_chord.root} chord'
+                })
+                return build_slash_chord(raw_chord, bass)
+        else:
+            # Bass is non-diatonic - likely octave error
+            corrected_bass = find_nearest_chord_tone(bass, chord_tones)
+            correction_context.justification.append({
+                'rule': 'bass_note_disambiguation',
+                'reasoning': f'Bass {bass} corrected to {corrected_bass} (octave error)'
+            })
+            raw_chord.bass_note = corrected_bass
+            return raw_chord
+
+
+
+
+def calculate_final_probability(raw_confidence, justifications, genre_profile):
+    """
+    Compute final confidence score based on:
+    - Original DSP confidence
+    - Number and weight of theory corrections
+    - Genre alignment
+    """
+    
+    # Start with raw confidence
+    score = raw_confidence
+    
+    # Bonus for theory confirmation
+    for justification in justifications:
+        if justification['rule'] in ['functional_harmony_tonic', 'authentic_cadence']:
+            score += 0.15
+        elif justification['rule'] == 'genre_probability':
+            score += 0.10 * justification.get('genre_weight', 0.5)
+        elif justification['rule'] == 'voice_leading_smoothness':
+            score += 0.08
+    
+    # Penalty for forced corrections (original was very confident but wrong)
+    if raw_confidence > 0.85 and len(justifications) > 0:
+        score -= 0.05  # Slight penalty for overriding confident DSP
+    
+    return min(score, 1.0)
+
+
+
+
+def get_expected_function(position, section_type, key_context):
+    """
+    Predict harmonic function based on position and section
+    
+    Common patterns:
+    - Verse: More diatonic, often I-IV-V-I or I-vi-IV-V
+    - Chorus: More dominant function, stronger cadences
+    - Bridge: Modulation or borrowed chords common
+    """
+    
+    if section_type == 'CHORUS':
+        if position % 4 == 3:  # 4th beat of phrase
+            return 'DOMINANT'
+        elif position % 4 == 2:
+            return 'PREDOMINANT'
+        else:
+            return 'TONIC'
+    
+    elif section_type == 'VERSE':
+        # Verses often have weaker functional pull
+        return 'AMBIGUOUS'
+    
+    elif section_type == 'BRIDGE':
+        return 'CHROMATIC'  # Expect borrowed/modal chords
+    
+    return 'AMBIGUOUS'
+________________
+
+
+3. Rhythmic DNA Sub-Schema (Extended Documentation)
+json
+{
+  "rhythmic_dna_extended_examples": {
+    "example_1_balkan_7_8": {
+      "time_signature": {"numerator": 7, "denominator": 8},
+      "pulse_pattern": [2, 2, 3],
+      "mnemonic_syllables": "apple apple galloping",
+      "macrobeat_structure": {
+        "tempo_bpm": 180,
+        "macrobeats_per_bar": 3,
+        "macrobeat_feel": "asymmetric"
+      },
+      "microbeat_base": {
+        "division_type": "binary",
+        "microbeats_per_macrobeat": 7,
+        "partition": "P=2+2+3"
+      },
+      "groove_descriptor": {
+        "groove_name": "Rachenitsa",
+        "characteristic_pattern": [
+          {"onset": 0, "accent": "primary", "duration": 2},
+          {"onset": 2, "accent": "secondary", "duration": 2},
+          {"onset": 4, "accent": "secondary", "duration": 3}
+        ]
+      },
+      "cyclic_length": 7,
+      "onset_positions": [0, 2, 4],
+      "genre_specific_feel": {
+        "microtiming_profile": "Very strict - metronomic",
+        "accent_pattern_cultural_origin": "Balkan"
+      }
+    },
+    
+    "example_2_cuban_son_clave": {
+      "time_signature": {"numerator": 4, "denominator": 4},
+      "pulse_pattern": [3, 3, 2, 2, 2],
+      "mnemonic_syllables": "galloping galloping apple apple apple",
+      "macrobeat_structure": {
+        "tempo_bpm": 120,
+        "macrobeats_per_bar": 4,
+        "macrobeat_feel": "even",
+        "backbeat_pattern": [2, 4]
+      },
+      "microbeat_base": {
+        "division_type": "binary",
+        "microbeats_per_macrobeat": 4,
+        "partition": "P=3+3+2+2+2"
+      },
+      "groove_descriptor": {
+        "groove_name": "Son Clave 3-2",
+        "characteristic_pattern": [
+          {"onset": 0, "accent": "primary", "duration": 3},
+          {"onset": 3, "accent": "primary", "duration": 3},
+          {"onset": 6, "accent": "secondary", "duration": 2},
+          {"onset": 8, "accent": "secondary", "duration": 2},
+          {"onset": 10, "accent": "secondary", "duration": 2}
+        ],
+        "complement_pattern": [1, 2, 4, 5, 7, 9, 11, 12, 13, 14, 15]
+      },
+      "cyclic_length": 16,
+      "onset_positions": [0, 3, 6, 10, 12],
+      "euclidean_algorithm": {
+        "k_onsets": 5,
+        "n_total_positions": 16,
+        "rotation": 0
+      },
+      "genre_specific_feel": {
+        "microtiming_profile": "Slight anticipation on offbeat onsets",
+        "ghost_note_pattern": [1, 2, 4, 5, 7, 9, 11, 13, 14, 15],
+        "accent_pattern_cultural_origin": "Cuban"
+      }
+    },
+    
+    "example_3_neo_soul_shuffle": {
+      "time_signature": {"numerator": 4, "denominator": 4},
+      "pulse_pattern": [3, 3, 3, 3],
+      "mnemonic_syllables": "triplet triplet triplet triplet",
+      "macrobeat_structure": {
+        "tempo_bpm": 85,
+        "macrobeats_per_bar": 4,
+        "macrobeat_feel": "shuffled",
+        "backbeat_pattern": [2, 4]
+      },
+      "microbeat_base": {
+        "division_type": "ternary",
+        "microbeats_per_macrobeat": 3,
+        "partition": "P=3",
+        "swing_ratio": 1.5
+      },
+      "groove_descriptor": {
+        "groove_name": "Neo-Soul Shuffle",
+        "characteristic_pattern": [
+          {"onset": 0, "accent": "primary", "duration": 2},
+          {"onset": 2.66, "accent": "ghost", "duration": 0.33},
+          {"onset": 3, "accent": "secondary", "duration": 2},
+          {"onset": 5.66, "accent": "ghost", "duration": 0.33}
+        ]
+      },
+      "cyclic_length": 12,
+      "onset_positions": [0, 2.66, 3, 5.66, 6, 8.66, 9, 11.66],
+      "genre_specific_feel": {
+        "microtiming_profile": "Heavy swing - 1.6:1 ratio, ghost notes very soft",
+        "ghost_note_pattern": [2.66, 5.66, 8.66, 11.66],
+        "accent_pattern_cultural_origin": "African-American"
+      }
+    },
+    
+    "example_4_polyrhythm_4_over_6": {
+      "time_signature": {"numerator": 4, "denominator": 4},
+      "pulse_pattern": [3, 3, 3, 3],
+      "macrobeat_structure": {
+        "tempo_bpm": 120,
+        "macrobeats_per_bar": 4
+      },
+      "microbeat_base": {
+        "division_type": "binary",
+        "microbeats_per_macrobeat": 4
+      },
+      "polyrhythm_layer": {
+        "secondary_pulse_pattern": [2, 2, 2, 2, 2, 2],
+        "composite_lcm": 12,
+        "description": "4/4 in bass, 6/8 feel in melody",
+        "alignment_points": [0, 12]
+      },
+      "cyclic_length": 12,
+      "onset_positions": {
+        "layer_1_4/4": [0, 3, 6, 9],
+        "layer_2_6/8": [0, 2, 4, 6, 8, 10]
+      },
+      "composite_pattern": [0, 2, 3, 4, 6, 8, 9, 10],
+      "theory_justification": "Hemiola effect - typical in Latin and West African music"
+    }
+  },
+  
+  "partition_permutation_library": {
+    "description": "Complete enumeration of rhythm patterns by partition",
+    "binary_4_microbeats": {
+      "P=4": ["•–––"],
+      "P=3+1": ["•––•", "•–•–", "•–", "–•••"],
+      "P=2+2": ["•–•–", "–•–•"],
+      "P=2+1+1": ["•–••", "–•–•", "••–•", "••–"],
+      "P=1+1+1+1": ["••••"]
+    },
+    "binary_8_microbeats": {
+      "P=3+3+2_tresillo": ["•––•––•–", "–•––•––•", "•–•––•––"],
+      "P=2+1+2+1+2_cinquillo": ["•–••–••–"]
+    },
+    "ternary_3_microbeats": {
+      "P=3": ["•––"],
+      "P=2+1": ["•–•", "–••", "•–"],
+      "P=1+1+1": ["•••"]
+    }
+  }
+}
+________________
+
+
+System Architecture Diagram (Conceptual)
+┌─────────────────────────────────────────────────────────────┐
+│                     AUDIO FILE INPUT                         │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│  PASS 1: THE LISTENER (Dry Linear Scan)                     │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ DSP Analysis:                                          │ │
+│  │ • Note Onset Detection (YIN, PYIN, Constant-Q)        │ │
+│  │ • Transient Detection                                 │ │
+│  │ • Chroma Feature Extraction                           │ │
+│  │ • Beat/Tempo Tracking                                 │ │
+│  │ • Spectral Analysis                                   │ │
+│  │                                                        │ │
+│  │ Output: Linear timeline with confidence scores        │ │
+│  └────────────────────────────────────────────────────────┘ │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│  PASS 2: THE ARCHITECT (Structure Detection)                │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ Self-Similarity Matrix Analysis                       │ │
+│  │ • Segment audio into repeated sections                │ │
+│  │ • Identify Verse/Chorus/Bridge via repetition        │ │
+│  │ • Extract "Harmonic DNA" per section                 │ │
+│  │ • Extract "Rhythmic DNA" per section                 │ │
+│  │                                                        │ │
+│  │ Output: Structural Map (distinct song sections)      │ │
+│  └────────────────────────────────────────────────────────┘ │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│  PASS 3: THE THEORIST (Wet Theory-Based Correction)         │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ Theory Rules Engine:                                  │ │
+│  │                                                        │ │
+│  │ 1. Functional Harmony Correction                     │ │
+│  │    • Identify Tonic/Predominant/Dominant functions   │ │
+│  │    • Enforce cadences                                │ │
+│  │                                                        │ │
+│  │ 2. Bass Note Disambiguation                          │ │
+│  │    • Resolve octave errors                           │ │
+│  │    • Identify slash chords vs. inversions           │ │
+│  │                                                        │ │
+│  │ 3. Genre Constraint Application                      │ │
+│  │    • Apply genre-specific progression probabilities  │ │
+│  │    • Add extensions (Jazz/Neo-Soul)                 │ │
+│  │                                                        │ │
+│  │ 4. Voice Leading Optimization                        │ │
+│  │    • Minimize voice leading costs                    │ │
+│  │    • Smooth chord transitions                        │ │
+│  │                                                        │ │
+│  │ 5. Rhythmic Theory                                   │ │
+│  │    • Validate pulse patterns (2s and 3s)            │ │
+│  │    • Detect polyrhythms                             │ │
+│  │    • Classify groove types                          │ │
+│  │                                                        │ │
+│  │ Output: Corrected progression with justifications    │ │
+│  └────────────────────────────────────────────────────────┘ │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    FINAL JSON OUTPUT                         │
+│  • Linear Analysis (with corrections)                       │
+│  • Structural Map (Verse/Chorus definitions)               │
+│  • Arrangement Flow (song form)                            │
+│
+Retry
+M
+Continue
+Orchestrated completion of architecture documentation with examples.
+The user wants me to continue from where I left off. I was in the middle of the system architecture diagram and need to complete it, then possibly add more implementation details, example outputs, and additional documentation.
+Let me continue with:
+1. Completing the architecture diagram
+2. Adding example JSON outputs
+3. Adding implementation notes
+4. Adding a worked example showing the correction process
+│  • Harmonic Context (keys, modulations, functional analysis) │
+│  • Rhythmic DNA (pulse patterns, groove descriptors)         │
+│  • Polyrhythmic Layers (if detected)                         │
+│  • All corrections with probability scores & justifications  │
+└─────────────────────────────────────────────────────────────┘
+________________
+
+
+4. Complete Worked Example: Pop Song Analysis
+Input Audio: "Example Song" (4 minutes, Pop genre)
+json
+{
+  "metadata": {
+    "file_path": "/audio/example_pop_song.wav",
+    "duration_seconds": 240.0,
+    "sample_rate": 44100,
+    "analysis_timestamp": "2025-11-18T14:30:00Z",
+    "engine_version": "1.0.0",
+    "confidence_threshold": 0.65
+  },
+  
+  "linear_analysis": {
+    "events": [
+      {
+        "timestamp": 0.0,
+        "event_type": "downbeat",
+        "confidence": 0.92
+      },
+      {
+        "timestamp": 0.5,
+        "event_type": "chord_candidate",
+        "chord_candidate": {
+          "root_candidates": [
+            {"root": "C", "probability": 0.78},
+            {"root": "A", "probability": 0.15}
+          ],
+          "quality_candidates": [
+            {"quality": "major", "probability": 0.82},
+            {"quality": "major7", "probability": 0.12}
+          ],
+          "bass_note": "C",
+          "bass_ambiguity_flag": false
+        },
+        "spectral_data": {
+          "dominant_frequencies": [261.63, 329.63, 392.0],
+          "spectral_centroid": 1500.5
+        },
+        "confidence": 0.78,
+        "ambiguity_flags": []
+      },
+      {
+        "timestamp": 2.0,
+        "event_type": "chord_candidate",
+        "chord_candidate": {
+          "root_candidates": [
+            {"root": "F#", "probability": 0.68},
+            {"root": "F", "probability": 0.25},
+            {"root": "D", "probability": 0.18}
+          ],
+          "quality_candidates": [
+            {"quality": "major", "probability": 0.71}
+          ],
+          "bass_note": "F#",
+          "bass_ambiguity_flag": true
+        },
+        "confidence": 0.68,
+        "ambiguity_flags": ["weak_fundamental", "bass_octave_error"]
+      },
+      {
+        "timestamp": 4.0,
+        "event_type": "chord_candidate",
+        "chord_candidate": {
+          "root_candidates": [
+            {"root": "G", "probability": 0.85}
+          ],
+          "quality_candidates": [
+            {"quality": "major", "probability": 0.72},
+            {"quality": "dominant7", "probability": 0.21}
+          ],
+          "bass_note": "G",
+          "bass_ambiguity_flag": false
+        },
+        "confidence": 0.85,
+        "ambiguity_flags": []
+      },
+      {
+        "timestamp": 6.0,
+        "event_type": "chord_candidate",
+        "chord_candidate": {
+          "root_candidates": [
+            {"root": "C", "probability": 0.81}
+          ],
+          "quality_candidates": [
+            {"quality": "major", "probability": 0.79}
+          ],
+          "bass_note": "C",
+          "bass_ambiguity_flag": false
+        },
+        "confidence": 0.81,
+        "ambiguity_flags": []
+      }
+    ],
+    
+    "beat_grid": {
+      "tempo_bpm": 120.0,
+      "tempo_stability": 0.94,
+      "beat_timestamps": [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5],
+      "downbeat_timestamps": [0.0, 2.0, 4.0, 6.0]
+    }
+  },
+  
+  "structural_map": {
+    "sections": [
+      {
+        "section_id": "SECTION_A1",
+        "section_label": "verse",
+        "section_variant": 1,
+        "time_range": {
+          "start_time": 0.0,
+          "end_time": 16.0,
+          "duration_bars": 8
+        },
+        
+        "harmonic_dna": {
+          "progression": [
+            {
+              "chord": {
+                "root": "C",
+                "quality": "major",
+                "extensions": [],
+                "alterations": [],
+                "voicing": {
+                  "type": "root_position",
+                  "bass_note": "C",
+                  "chord_tones": ["C", "E", "G"],
+                  "voicing_density": "open"
+                }
+              },
+              "duration_beats": 4,
+              "position_in_bar": 1,
+              "probability_score": 0.92,
+              "raw_probability": 0.78,
+              "theory_justification": {
+                "correction_applied": false,
+                "original_chord": "Cmaj",
+                "corrected_chord": "Cmaj",
+                "reasoning": "Strong tonic function. DSP confidence high. No correction needed.",
+                "rules_applied": ["functional_harmony_tonic"],
+                "genre_weight": 0.85
+              },
+              "functional_analysis": {
+                "roman_numeral": "I",
+                "scale_degree": 1,
+                "function": "tonic",
+                "cadence_point": "none"
+              }
+            },
+            {
+              "chord": {
+                "root": "F",
+                "quality": "major",
+                "extensions": [],
+                "alterations": [],
+                "voicing": {
+                  "type": "root_position",
+                  "bass_note": "F",
+                  "chord_tones": ["F", "A", "C"],
+                  "voicing_density": "close"
+                }
+              },
+              "duration_beats": 4,
+              "position_in_bar": 1,
+              "probability_score": 0.88,
+              "raw_probability": 0.68,
+              "theory_justification": {
+                "correction_applied": true,
+                "original_chord": "F#maj",
+                "corrected_chord": "Fmaj",
+                "reasoning": "DSP detected F# but bass was ambiguous with weak fundamental. In Pop genre, IV chord (F) is vastly more common than F# (which would be #IV or V7/V). Position is predominant function. Bass correction from F# to F.",
+                "rules_applied": [
+                  "genre_probability",
+                  "functional_harmony_predominant",
+                  "bass_note_disambiguation"
+                ],
+                "genre_weight": 0.85
+              },
+              "functional_analysis": {
+                "roman_numeral": "IV",
+                "scale_degree": 4,
+                "function": "predominant",
+                "cadence_point": "none"
+              }
+            },
+            {
+              "chord": {
+                "root": "G",
+                "quality": "major",
+                "extensions": [],
+                "alterations": [],
+                "voicing": {
+                  "type": "root_position",
+                  "bass_note": "G",
+                  "chord_tones": ["G", "B", "D"],
+                  "voicing_density": "open"
+                }
+              },
+              "duration_beats": 4,
+              "position_in_bar": 1,
+              "probability_score": 0.89,
+              "raw_probability": 0.85,
+              "theory_justification": {
+                "correction_applied": false,
+                "original_chord": "Gmaj",
+                "corrected_chord": "Gmaj",
+                "reasoning": "Strong dominant function (V). High DSP confidence. Typical pop progression I-IV-V.",
+                "rules_applied": ["functional_harmony_dominant"],
+                "genre_weight": 0.82
+              },
+              "functional_analysis": {
+                "roman_numeral": "V",
+                "scale_degree": 5,
+                "function": "dominant",
+                "cadence_point": "none"
+              }
+            },
+            {
+              "chord": {
+                "root": "C",
+                "quality": "major",
+                "extensions": [],
+                "alterations": [],
+                "voicing": {
+                  "type": "root_position",
+                  "bass_note": "C",
+                  "chord_tones": ["C", "E", "G"],
+                  "voicing_density": "open"
+                }
+              },
+              "duration_beats": 4,
+              "position_in_bar": 1,
+              "probability_score": 0.95,
+              "raw_probability": 0.81,
+              "theory_justification": {
+                "correction_applied": false,
+                "original_chord": "Cmaj",
+                "corrected_chord": "Cmaj",
+                "reasoning": "Authentic cadence (V-I). End of phrase requires tonic resolution. High confidence.",
+                "rules_applied": [
+                  "functional_harmony_tonic",
+                  "authentic_cadence"
+                ],
+                "genre_weight": 0.90
+              },
+              "functional_analysis": {
+                "roman_numeral": "I",
+                "scale_degree": 1,
+                "function": "tonic",
+                "cadence_point": "authentic"
+              }
+            }
+          ],
+          
+          "key_center": "C",
+          "mode": "ionian",
+          "harmonic_rhythm": "1 chord per bar",
+          "characteristic_moves": [
+            "I-IV motion (typical pop)",
+            "IV-V-I authentic cadence"
+          ]
+        },
+        
+        "rhythmic_dna": {
+          "time_signature": {
+            "numerator": 4,
+            "denominator": 4
+          },
+          "pulse_pattern": [4, 4, 4, 4],
+          "mnemonic_syllables": "standard 4/4 - no additive rhythm",
+          "macrobeat_structure": {
+            "tempo_bpm": 120,
+            "macrobeats_per_bar": 4,
+            "macrobeat_feel": "even",
+            "backbeat_pattern": [2, 4]
+          },
+          "microbeat_base": {
+            "division_type": "binary",
+            "microbeats_per_macrobeat": 4,
+            "partition": "P=4",
+            "swing_ratio": 1.0
+          },
+          "groove_descriptor": {
+            "groove_name": "Standard Pop/Rock",
+            "characteristic_pattern": [
+              {"onset": 0, "accent": "primary", "duration": 1},
+              {"onset": 2, "accent": "secondary", "duration": 1},
+              {"onset": 4, "accent": "tertiary", "duration": 1},
+              {"onset": 6, "accent": "secondary", "duration": 1}
+            ]
+          },
+          "cyclic_length": 16,
+          "onset_positions": [0, 4, 8, 12],
+          "genre_specific_feel": {
+            "microtiming_profile": "Straight - minimal swing",
+            "accent_pattern_cultural_origin": "Western Pop/Rock"
+          }
+        },
+        
+        "melodic_contour": {
+          "range_semitones": 12,
+          "average_pitch": 261.63,
+          "contour_shape": "arch"
+        },
+        
+        "similarity_matrix": {
+          "method": "chromagram",
+          "similarity_scores": [0.95, 0.92, 0.88, 0.91],
+          "repetition_indices": [0, 16, 32]
+        }
+      },
+      
+      {
+        "section_id": "SECTION_B1",
+        "section_label": "chorus",
+        "section_variant": 1,
+        "time_range": {
+          "start_time": 16.0,
+          "end_time": 32.0,
+          "duration_bars": 8
+        },
+        
+        "harmonic_dna": {
+          "progression": [
+            {
+              "chord": {
+                "root": "F",
+                "quality": "major",
+                "extensions": [],
+                "voicing": {
+                  "type": "root_position",
+                  "bass_note": "F",
+                  "chord_tones": ["F", "A", "C"]
+                }
+              },
+              "duration_beats": 2,
+              "position_in_bar": 1,
+              "probability_score": 0.87,
+              "raw_probability": 0.79,
+              "theory_justification": {
+                "correction_applied": false,
+                "reasoning": "Chorus often starts on IV for energy lift. Typical pop convention.",
+                "rules_applied": ["functional_harmony_predominant"],
+                "genre_weight": 0.80
+              },
+              "functional_analysis": {
+                "roman_numeral": "IV",
+                "scale_degree": 4,
+                "function": "predominant",
+                "cadence_point": "none"
+              }
+            },
+            {
+              "chord": {
+                "root": "G",
+                "quality": "major",
+                "extensions": [],
+                "voicing": {
+                  "type": "root_position",
+                  "bass_note": "G",
+                  "chord_tones": ["G", "B", "D"]
+                }
+              },
+              "duration_beats": 2,
+              "position_in_bar": 3,
+              "probability_score": 0.91,
+              "raw_probability": 0.88,
+              "theory_justification": {
+                "correction_applied": false,
+                "reasoning": "Strong dominant leading to tonic. Increased harmonic rhythm (2 beats vs. 4 in verse) creates forward momentum.",
+                "rules_applied": ["functional_harmony_dominant", "harmonic_rhythm_consistency"],
+                "genre_weight": 0.83
+              },
+              "functional_analysis": {
+                "roman_numeral": "V",
+                "scale_degree": 5,
+                "function": "dominant",
+                "cadence_point": "none"
+              }
+            },
+            {
+              "chord": {
+                "root": "A",
+                "quality": "minor",
+                "extensions": [],
+                "voicing": {
+                  "type": "root_position",
+                  "bass_note": "A",
+                  "chord_tones": ["A", "C", "E"]
+                }
+              },
+              "duration_beats": 2,
+              "position_in_bar": 1,
+              "probability_score": 0.84,
+              "raw_probability": 0.80,
+              "theory_justification": {
+                "correction_applied": false,
+                "reasoning": "vi chord (relative minor). Common in pop for emotional depth. Part of I-V-vi-IV axis.",
+                "rules_applied": ["genre_probability"],
+                "genre_weight": 0.88
+              },
+              "functional_analysis": {
+                "roman_numeral": "vi",
+                "scale_degree": 6,
+                "function": "submediant",
+                "cadence_point": "none"
+              }
+            },
+            {
+              "chord": {
+                "root": "F",
+                "quality": "major",
+                "extensions": [],
+                "voicing": {
+                  "type": "root_position",
+                  "bass_note": "F",
+                  "chord_tones": ["F", "A", "C"]
+                }
+              },
+              "duration_beats": 2,
+              "position_in_bar": 3,
+              "probability_score": 0.86,
+              "raw_probability": 0.82,
+              "theory_justification": {
+                "correction_applied": false,
+                "reasoning": "Return to IV. Classic I-V-vi-IV 'pop progression' detected.",
+                "rules_applied": ["genre_probability"],
+                "genre_weight": 0.92
+              },
+              "functional_analysis": {
+                "roman_numeral": "IV",
+                "scale_degree": 4,
+                "function": "predominant",
+                "cadence_point": "none"
+              }
+            }
+          ],
+          
+          "key_center": "C",
+          "mode": "ionian",
+          "harmonic_rhythm": "2 chords per bar (faster than verse)",
+          "characteristic_moves": [
+            "I-V-vi-IV axis (modern pop)",
+            "Increased harmonic rhythm for energy"
+          ]
+        },
+        
+        "rhythmic_dna": {
+          "time_signature": {
+            "numerator": 4,
+            "denominator": 4
+          },
+          "pulse_pattern": [4, 4, 4, 4],
+          "macrobeat_structure": {
+            "tempo_bpm": 120,
+            "macrobeats_per_bar": 4,
+            "macrobeat_feel": "even",
+            "backbeat_pattern": [2, 4]
+          },
+          "microbeat_base": {
+            "division_type": "binary",
+            "microbeats_per_macrobeat": 4,
+            "partition": "P=4"
+          },
+          "groove_descriptor": {
+            "groove_name": "Pop/Rock Chorus Drive",
+            "characteristic_pattern": [
+              {"onset": 0, "accent": "primary", "duration": 1},
+              {"onset": 2, "accent": "secondary", "duration": 1},
+              {"onset": 4, "accent": "tertiary", "duration": 1},
+              {"onset": 6, "accent": "secondary", "duration": 1}
+            ]
+          },
+          "cyclic_length": 16,
+          "genre_specific_feel": {
+            "microtiming_profile": "Slightly pushed - eighth notes anticipate slightly",
+            "accent_pattern_cultural_origin": "Western Pop/Rock"
+          }
+        }
+      }
+    ]
+  },
+  
+  "arrangement_flow": {
+    "form": "Verse-Chorus Form",
+    "timeline": [
+      {
+        "position": 1,
+        "section_reference": "SECTION_A1",
+        "start_time": 0.0,
+        "end_time": 16.0,
+        "variations": []
+      },
+      {
+        "position": 2,
+        "section_reference": "SECTION_A1",
+        "start_time": 16.0,
+        "end_time": 32.0,
+        "variations": ["instrumentation_change"]
+      },
+      {
+        "position": 3,
+        "section_reference": "SECTION_B1",
+        "start_time": 32.0,
+        "end_time": 48.0,
+        "variations": []
+      },
+      {
+        "position": 4,
+        "section_reference": "SECTION_A1",
+        "start_time": 48.0,
+        "end_time": 64.0,
+        "variations": ["dynamic_shift"]
+      },
+      {
+        "position": 5,
+        "section_reference": "SECTION_B1",
+        "start_time": 64.0,
+        "end_time": 80.0,
+        "variations": []
+      }
+    ],
+    
+    "transitions": [
+      {
+        "from_section": "SECTION_A1",
+        "to_section": "SECTION_B1",
+        "transition_time": 31.5,
+        "transition_type": "drum_fill"
+      },
+      {
+        "from_section": "SECTION_B1",
+        "to_section": "SECTION_A1",
+        "transition_time": 47.5,
+        "transition_type": "direct"
+      }
+    ]
+  },
+  
+  "harmonic_context": {
+    "global_key": {
+      "primary_key": "C major",
+      "mode": "ionian",
+      "confidence": 0.94
+    },
+    
+    "modulations": [],
+    
+    "borrowed_chords": [],
+    
+    "genre_profile": {
+      "detected_genre": "Pop",
+      "confidence": 0.91,
+      "genre_constraints": {
+        "common_progressions": [
+          "I-IV-V-I",
+          "I-V-vi-IV",
+          "I-vi-IV-V",
+          "vi-IV-I-V"
+        ],
+        "allowed_extensions": ["maj7", "add9", "sus2", "sus4"],
+        "forbidden_moves": [
+          "tritone_substitution",
+          "altered_dominants_except_V7"
+        ],
+        "cadence_preferences": {
+          "authentic": 0.85,
+          "plagal": 0.10,
+          "half": 0.05
+        }
+      }
+    },
+    
+    "functional_summary": {
+      "predominant_usage": 0.35,
+      "dominant_usage": 0.25,
+      "tonic_usage": 0.40,
+      "chromatic_density": 0.02
+    }
+  },
+  
+  "polyrhythmic_layers": []
+}
+________________
+
+
+5. Advanced Example: Jazz/Fusion with Polyrhythm
+json
+{
+  "structural_map": {
+    "sections": [
+      {
+        "section_id": "SECTION_C1",
+        "section_label": "solo",
+        "section_variant": 1,
+        "time_range": {
+          "start_time": 60.0,
+          "end_time": 92.0,
+          "duration_bars": 16
+        },
+        
+        "harmonic_dna": {
+          "progression": [
+            {
+              "chord": {
+                "root": "Eb",
+                "quality": "major7",
+                "extensions": ["9", "#11"],
+                "voicing": {
+                  "type": "drop2",
+                  "bass_note": "Eb",
+                  "chord_tones": ["Eb", "G", "Bb", "D", "F", "A"],
+                  "voicing_density": "spread"
+                }
+              },
+              "duration_beats": 2,
+              "position_in_bar": 1,
+              "probability_score": 0.78,
+              "raw_probability": 0.52,
+              "theory_justification": {
+                "correction_applied": true,
+                "original_chord": "Ebmaj",
+                "corrected_chord": "Ebmaj7(#11)",
+                "reasoning": "Jazz context requires extended harmony. Detected #11 (A natural) in melody line. DSP only detected triad, but genre profile demands 7th minimum. Lydian quality (#11) confirmed by melodic analysis.",
+                "rules_applied": [
+                  "genre_extension",
+                  "modal_interchange"
+                ],
+                "genre_weight": 0.75
+              },
+              "functional_analysis": {
+                "roman_numeral": "bVII",
+                "scale_degree": 7,
+                "function": "mediant",
+                "cadence_point": "none"
+              }
+            },
+            {
+              "chord": {
+                "root": "A",
+                "quality": "dominant7",
+                "extensions": ["b9", "#9", "#11"],
+                "alterations": ["b9", "#9", "#11"],
+                "voicing": {
+                  "type": "quartal",
+                  "bass_note": "A",
+                  "chord_tones": ["A", "C#", "Eb", "G", "Bb", "C", "D#"],
+                  "voicing_density": "close"
+                }
+              },
+              "duration_beats": 2,
+              "position_in_bar": 3,
+              "probability_score": 0.82,
+              "raw_probability": 0.61,
+              "theory_justification": {
+                "correction_applied": true,
+                "original_chord": "A7",
+                "corrected_chord": "A7(b9,#9,#11)",
+                "reasoning": "Altered dominant detected. DSP identified basic A7, but spectral analysis shows b9 (Bb), #9 (C natural), and #11 (D#). Tritone substitution target (resolves to Dm). Jazz/Fusion genre strongly supports altered dominants.",
+                "rules_applied": [
+                  "genre_extension",
+                  "functional_harmony_dominant",
+                  "secondary_dominant"
+                ],
+                "genre_weight": 0.88
+              },
+              "functional_analysis": {
+                "roman_numeral": "V7/ii",
+                "scale_degree": 5,
+                "function": "dominant",
+                "cadence_point": "none",
+                "tonicization_target": "Dm"
+              }
+            },
+            {
+              "chord": {
+                "root": "D",
+                "quality": "minor7",
+                "extensions": ["9", "11"],
+                "voicing": {
+                  "type": "drop3",
+                  "bass_note": "D",
+                  "chord_tones": ["D", "F", "A", "C", "E", "G"],
+                  "voicing_density": "open"
+                }
+              },
+              "duration_beats": 4,
+              "position_in_bar": 1,
+              "probability_score": 0.89,
+              "raw_probability": 0.84,
+              "theory_justification": {
+                "correction_applied": true,
+                "original_chord": "Dmin7",
+                "corrected_chord": "Dmin7(9,11)",
+                "reasoning": "Target of altered dominant. Extensions (9, 11) detected in voicing. Jazz standard requires minimum 7th, extensions common on longer duration chords.",
+                "rules_applied": [
+                  "genre_extension",
+                  "voice_leading_smoothness"
+                ],
+                "genre_weight": 0.82
+              },
+              "functional_analysis": {
+                "roman_numeral": "ii",
+                "scale_degree": 2,
+                "function": "predominant",
+                "cadence_point": "none"
+              }
+            }
+          ],
+          
+          "key_center": "C",
+          "mode": "dorian",
+          "harmonic_rhythm": "2-4 beats per chord (varied)",
+          "characteristic_moves": [
+            "bVII maj7 (modal interchange from C mixolydian)",
+            "Altered dominant resolving to ii",
+            "Extended tertian harmony throughout"
+          ]
+        },
+        
+        "rhythmic_dna": {
+          "time_signature": {
+            "numerator": 7,
+            "denominator": 8
+          },
+          "pulse_pattern": [2, 2, 3],
+          "mnemonic_syllables": "apple apple galloping",
+          "macrobeat_structure": {
+            "tempo_bpm": 168,
+            "macrobeats_per_bar": 3,
+            "macrobeat_feel": "asymmetric"
+          },
+          "microbeat_base": {
+            "division_type": "binary",
+            "microbeats_per_macrobeat": 7,
+            "partition": "P=2+2+3"
+          },
+          "groove_descriptor": {
+            "groove_name": "Balkan-Fusion 7/8",
+            "characteristic_pattern": [
+              {"onset": 0, "accent": "primary", "duration": 2},
+              {"onset": 2, "accent": "secondary", "duration": 2},
+              {"onset": 4, "accent": "secondary", "duration": 3}
+            ],
+            "complement_pattern": [1, 3, 5, 6]
+          },
+          "cyclic_length": 7,
+          "onset_positions": [0, 2, 4],
+          "euclidean_algorithm": {
+            "k_onsets": 3,
+            "n_total_positions": 7,
+            "rotation": 0
+          },
+          "genre_specific_feel": {
+            "microtiming_profile": "Metronomic - strict subdivision",
+            "accent_pattern_cultural_origin": "Balkan (Bulgarian/Macedonian)"
+          }
+        }
+      }
+    ]
+  },
+  
+  "polyrhythmic_layers": [
+    {
+      "layer_id": "POLY_1",
+      "time_range": {
+        "start_time": 60.0,
+        "end_time": 92.0
+      },
+      "primary_meter": {
+        "time_signature": {"numerator": 7, "denominator": 8},
+        "pulse_pattern": [2, 2, 3],
+        "macrobeat_structure": {
+          "tempo_bpm": 168,
+          "macrobeats_per_bar": 3
+        }
+      },
+      "secondary_meter": {
+        "time_signature": {"numerator": 4, "denominator": 4},
+        "pulse_pattern": [4, 4, 4, 4],
+        "macrobeat_structure": {
+          "tempo_bpm": 147,
+          "macrobeats_per_bar": 4
+        }
+      },
+      "polyrhythm_ratio": "7:8",
+      "composite_feel": "Bass/drums play 7/8 additive rhythm while piano improvises over implied 4/4 grid",
+      "theory_justification": "Common in progressive jazz/fusion. Creates rhythmic tension. LCM = 28 eighth notes (4 bars of 7/8 = 7 bars of 4/4). Alignment every 3.5 seconds."
+    }
+  ],
+  
+  "harmonic_context": {
+    "global_key": {
+      "primary_key": "C",
+      "mode": "dorian",
+      "confidence": 0.76
+    },
+    
+    "modulations": [
+      {
+        "timestamp": 60.0,
+        "from_key": "C major",
+        "to_key": "C dorian",
+        "modulation_technique": "direct modal shift",
+        "probability_score": 0.81,
+        "theory_justification": "Solo section uses C dorian (Bb instead of B natural). Modal jazz convention."
+      }
+    ],
+    
+    "borrowed_chords": [
+      {
+        "timestamp": 60.0,
+        "chord": "Ebmaj7(#11)",
+        "borrowed_from": "C mixolydian / Eb lydian",
+        "theory_justification": "bVII chord - common modal interchange in jazz. Lydian quality (#11) suggests Eb lydian thinking."
+      }
+    ],
+    
+    "genre_profile": {
+      "detected_genre": "Jazz/Fusion",
+      "confidence": 0.88,
+      "genre_constraints": {
+        "common_progressions": [
+          "ii-V-I",
+          "iii-VI-ii-V",
+          "modal vamps",
+          "tritone_substitutions"
+        ],
+        "allowed_extensions": ["7", "maj7", "9", "#9", "b9", "11", "#11", "13", "b13"],
+        "forbidden_moves": [],
+        "cadence_preferences": {
+          "authentic": 0.40,
+          "deceptive": 0.30,
+          "half": 0.20,
+          "modal_vamp": 0.10
+        }
+      }
+    },
+    
+    "functional_summary": {
+      "predominant_usage": 0.30,
+      "dominant_usage": 0.35,
+      "tonic_usage": 0.20,
+      "chromatic_density": 0.45
+    }
+  }
+}
+________________
+
+
+6. Implementation Notes & Best Practices
+Error Correction Confidence Thresholds
+python
+CONFIDENCE_THRESHOLDS = {
+    'bass_ambiguity': {
+        'correction_trigger': 0.70,  # Below this, apply bass disambiguation
+        'genre_weight_multiplier': 1.2  # Increase genre influence when bass is unclear
+    },
+    'chord_quality': {
+        'correction_trigger': 0.65,
+        'functional_harmony_boost': 0.15  # Add to probability if theory agrees
+    },
+    'extension_detection': {
+        'minimum_confidence': 0.55,  # Ignore extensions below this unless genre demands them
+        'jazz_genre_override': True  # Force extension detection in jazz
+    },
+    'modulation': {
+        'minimum_evidence_duration': 8.0,  # Seconds - don't declare modulation too quickly
+        'chromatic_density_threshold': 0.30  # % non-diatonic chords needed
+    }
+}
+Voice Leading Cost Calculation
+python
+def calculate_voice_leading(prev_chord, next_chord):
+    """
+    Calculate the total semitone distance moved by all voices.
+    Lower cost = smoother voice leading.
+    """
+    cost = 0
+    prev_tones = sorted(prev_chord.chord_tones, key=lambda x: midi_to_number(x))
+    next_tones = sorted(next_chord.chord_tones, key=lambda x: midi_to_number(x))
+    
+    # Use Hungarian algorithm for optimal voice pairing
+    assignments = optimal_voice_assignment(prev_tones, next_tones)
+    
+    for (prev_voice, next_voice) in assignments:
+        interval = abs(midi_to_number(next_voice) - midi_to_number(prev_voice))
+        
+        # Penalize large leaps
+        if interval <= 2:  # Step-wise motion
+            cost += interval * 1.0
+        elif interval <= 4:  # Small leap
+            cost += interval * 1.5
+        elif interval <= 7:  # Medium leap
+            cost += interval * 2.5
+        else:  # Large leap (octave or more)
+            cost += interval * 4.0
+    
+    return cost
+Genre Profile Database Schema
+json
+{
+  "genre_profiles": {
+    "pop": {
+      "common_progressions": {
+        "I-IV-V-I": 0.85,
+        "I-V-vi-IV": 0.90,
+        "vi-IV-I-V": 0.80,
+        "I-vi-IV-V": 0.75
+      },
+      "allowed_chords": {
+        "I": 0.95,
+        "ii": 0.40,
+        "iii": 0.25,
+        "IV": 0.92,
+        "V": 0.88,
+        "vi": 0.85,
+        "vii°": 0.10
+      },
+      "extension_probability": {
+        "maj7": 0.15,
+        "min7": 0.20,
+        "dom7": 0.35,
+        "9th": 0.05,
+        "11th": 0.02,
+        "13th": 0.01
+      },
+      "chromatic_tolerance": 0.10,
+      "secondary_dominant_usage": 0.20
+    },
+    
+    "jazz": {
+      "common_progressions": {
+        "ii-V-I": 0.95,
+        "I-VI-ii-V": 0.80,
+        "iii-VI-ii-V": 0.75,
+        "tritone_sub": 0.60
+      },
+      "allowed_chords": "all",
+      "extension_probability": {
+        "maj7": 0.85,
+        "min7": 0.90,
+        "dom7": 0.95,
+        "9th": 0.80,
+        "11th": 0.70,
+        "13th": 0.65,
+        "altered": 0.55
+      },
+      "chromatic_tolerance": 0.60,
+      "secondary_dominant_usage": 0.70,
+      "modal_interchange_usage": 0.50
+    },
+    
+    "neo_soul": {
+      "common_progressions": {
+        "vi-V-IV-III": 0.75,
+        "ii-I-IV-V": 0.70,
+        "modal_vamp": 0.60
+      },
+      "extension_probability": {
+        "maj7": 0.70,
+        "maj9": 0.65,
+        "min7": 0.75,
+        "min9": 0.70,
+        "dom7": 0.80,
+        "9th": 0.75,
+        "11th": 0.60,
+        "13th": 0.55
+      },
+      "chromatic_tolerance": 0.35,
+      "slash_chord_usage": 0.45,
+      "characteristic_moves": ["bVII", "bII", "bVI"]
+    }
+  }
+}
+________________
+
+
+7. API Endpoints Design
+python
+# Flask/FastAPI endpoint structure
+
+
+@app.post("/analyze")
+async def analyze_audio(
+    audio_file: UploadFile,
+    genre_hint: Optional[str] = None,
+    confidence_threshold: float = 0.65,
+    enable_polyrhythm_detection: bool = True
+):
+    """
+    Main analysis endpoint
+    Returns: Complete JSON structure as defined in schema
+    """
+    pass
+
+
+@app.get("/progression/{song_id}/correct")
+async def get_corrected_progression(
+    song_id: str,
+    section_id: Optional[str] = None
+):
+    """
+    Return only the corrected chord progression with justifications
+    """
+    pass
+
+
+@app.get("/rhythm/{song_id}/dna")
+async def get_rhythmic_dna(song_id: str):
+    """
+    Return detailed rhythmic analysis including pulse patterns
+    """
+    pass
+
+
+@app.post("/validate/chord_sequence")
+async def validate_chord_sequence(
+    chords: List[str],
+    key: str,
+    genre: str
+):
+    """
+    Validate a user-provided chord sequence against theory rules
+    Returns probability scores and suggestions
+    """
+    pass
+________________
+
+
+Summary
+This Structure-First Music Analysis Engine implements a three-pass system that:
+1. Listens to raw audio without bias (DSP)
+2. Architectures the song into reusable structural blocks
+3. Theorizes corrections using functional harmony, genre constraints, and rhythmic theory
+Key innovations:
+* Probability scores at every level with explicit theory justifications
+* Rhythmic DNA captures groove beyond time signatures using additive rhythm (2s and 3s)
+* Polyrhythm support for complex layered meters
+* Extended harmony for jazz/neo-soul with voicing specifications
+* Genre-aware correction that doesn't force classical theory onto pop music
+* Error-correction transparency - every change is documented
+The schema is production-ready, extensible, and designed for real-world music complexity.

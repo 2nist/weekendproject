@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+.cache/
+.parcel-cache/
+.next/
+.vite/
+out/
+coverage/
+*.sqlite
+*.db
+.env
+.env.*
+.vscode/
+.git/
+electron-builder.yml
+*.log
