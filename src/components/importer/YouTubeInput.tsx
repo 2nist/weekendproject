@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import Button from '@/components/ui/button';
 import { Download, Loader2 } from 'lucide-react';
 
-export const YouTubeInput: React.FC<{ onFileReady: (path: string) => void }> = ({ onFileReady }) => {
+export const YouTubeInput: React.FC<{
+  onFileReady: (path: string) => void;
+}> = ({ onFileReady }) => {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const handleImport = async () => {
@@ -37,7 +39,11 @@ export const YouTubeInput: React.FC<{ onFileReady: (path: string) => void }> = (
         disabled={loading}
         className="bg-music-kick hover:bg-music-kick/80 text-black font-bold"
       >
-        {loading ? <Loader2 className="animate-spin w-4 h-4" /> : <Download className="w-4 h-4 mr-2" />}
+        {loading ? (
+          <Loader2 className="animate-spin w-4 h-4" />
+        ) : (
+          <Download className="w-4 h-4 mr-2" />
+        )}
         Import
       </Button>
     </div>

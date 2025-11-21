@@ -1,7 +1,8 @@
 import React from 'react';
 import useAppIPC from '../hooks/useAppIPC';
+import { Button } from './ui/button';
 
-export default function Toolbar() {
+export default function Toolbar({ openSandbox } = {}) {
   const { sendCommand, status, connected } = useAppIPC();
 
   // status is expected to contain { isPlaying, isRecording, bpm, ... }
@@ -34,7 +35,7 @@ export default function Toolbar() {
 
   return (
     <div className="flex items-center gap-4">
-      <button
+      <Button
         onClick={handlePlay}
         className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2 disabled:opacity-50 disabled:pointer-events-none"
         aria-pressed={isPlaying}
@@ -43,17 +44,17 @@ export default function Toolbar() {
         title="Play"
       >
         ▶ Play
-      </button>
+      </Button>
 
-      <button
+      <Button
         onClick={handleStop}
         className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
         title="Stop"
       >
         ■ Stop
-      </button>
+      </Button>
 
-      <button
+      <Button
         onClick={handleRecord}
         className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium h-10 px-4 py-2 disabled:opacity-50 disabled:pointer-events-none ${
           isRecording
@@ -66,11 +67,20 @@ export default function Toolbar() {
         title="Record"
       >
         ⦿ Record
-      </button>
+      </Button>
 
       <div className="ml-4 text-sm text-muted-foreground">
         BPM: <span className="font-medium">{status?.bpm ?? '—'}</span>
       </div>
+      {openSandbox ? (
+        <Button
+          onClick={() => openSandbox()}
+          className="ml-4 px-2 py-1 text-xs"
+          title="Open Sandbox"
+        >
+          Sandbox
+        </Button>
+      ) : null}
     </div>
   );
 }

@@ -98,35 +98,65 @@ async function init(app) {
       harmonic_context_json TEXT
     );
   `);
+
+  // Projects table for user library
+  db.run(`
+    CREATE TABLE IF NOT EXISTS Projects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uuid TEXT UNIQUE,
+      title TEXT,
+      artist TEXT,
+      bpm INTEGER,
+      key_signature TEXT,
+      audio_path TEXT,
+      midi_path TEXT,
+      analysis_id INTEGER,
+      status TEXT,
+      metadata_json TEXT,
+      created_at TEXT
+    );
+  `);
 }
 
 function populateInitialData() {
   // Insert some sample data for testing
-  db.run('INSERT OR IGNORE INTO Mappings (id, name, type, mapping, actions_json) VALUES (?, ?, ?, ?, ?)', [
-    60,
-    'Test Macro',
-    'noteon',
-    'APC64_PAD_A1',
-    JSON.stringify([
-      {
-        daw: 'reaper',
-        track: 'DRUMS',
-        command: 'volume',
-        value: 1.0,
-      },
-      {
-        daw: 'ableton',
-        track: 'DRUMS',
-        command: 'volume',
-        value: 1.0,
-      },
-    ]),
-  ]);
+  db.run(
+    'INSERT OR IGNORE INTO Mappings (id, name, type, mapping, actions_json) VALUES (?, ?, ?, ?, ?)',
+    [
+      60,
+      'Test Macro',
+      'noteon',
+      'APC64_PAD_A1',
+      JSON.stringify([
+        {
+          daw: 'reaper',
+          track: 'DRUMS',
+          command: 'volume',
+          value: 1.0,
+        },
+        {
+          daw: 'ableton',
+          track: 'DRUMS',
+          command: 'volume',
+          value: 1.0,
+        },
+      ]),
+    ],
+  );
 
   // Populate Settings table
-  db.run('INSERT OR IGNORE INTO Settings (key, value) VALUES (?, ?)', ['reaper_port', '9000']);
-  db.run('INSERT OR IGNORE INTO Settings (key, value) VALUES (?, ?)', ['ableton_port', '9001']);
-  db.run('INSERT OR IGNORE INTO Settings (key, value) VALUES (?, ?)', ['default_bpm', '120']);
+  db.run('INSERT OR IGNORE INTO Settings (key, value) VALUES (?, ?)', [
+    'reaper_port',
+    '9000',
+  ]);
+  db.run('INSERT OR IGNORE INTO Settings (key, value) VALUES (?, ?)', [
+    'ableton_port',
+    '9001',
+  ]);
+  db.run('INSERT OR IGNORE INTO Settings (key, value) VALUES (?, ?)', [
+    'default_bpm',
+    '120',
+  ]);
   db.run('INSERT OR IGNORE INTO Settings (key, value) VALUES (?, ?)', [
     'track_list',
     'DRUMS,BASS,KEYS,VOCALS',
@@ -190,7 +220,9 @@ function saveAnalysis(analysisData) {
 
     // Check for existing record
     let existingId = null;
-    const existingStmt = db.prepare('SELECT id FROM AudioAnalysis WHERE file_hash = ?');
+    const existingStmt = db.prepare(
+      'SELECT id FROM AudioAnalysis WHERE file_hash = ?',
+    );
     existingStmt.bind([file_hash]);
     if (existingStmt.step()) {
       const row = existingStmt.getAsObject();
@@ -200,7 +232,9 @@ function saveAnalysis(analysisData) {
 
     if (existingId) {
       console.log('DB: Removing existing analysis with ID:', existingId);
-      db.run('DELETE FROM AnalysisSections WHERE analysis_id = ?', [existingId]);
+      db.run('DELETE FROM AnalysisSections WHERE analysis_id = ?', [
+        existingId,
+      ]);
       db.run('DELETE FROM AudioAnalysis WHERE id = ?', [existingId]);
     }
 
@@ -222,9 +256,11 @@ function saveAnalysis(analysisData) {
         JSON.stringify(polyrhythmic_layers || []),
       ],
     );
-    
+
     // Get the inserted ID
-    const getIdStmt = db.prepare('SELECT id FROM AudioAnalysis WHERE file_hash = ?');
+    const getIdStmt = db.prepare(
+      'SELECT id FROM AudioAnalysis WHERE file_hash = ?',
+    );
     getIdStmt.bind([file_hash]);
     let analysisId = null;
     if (getIdStmt.step()) {
@@ -236,9 +272,9 @@ function saveAnalysis(analysisData) {
     if (!analysisId) {
       throw new Error('Failed to retrieve analysis ID after insert');
     }
-    
+
     console.log('DB: Analysis saved successfully, ID:', analysisId);
-    
+
     // Persist database to disk
     try {
       const data = db.export();
@@ -249,12 +285,18 @@ function saveAnalysis(analysisData) {
       console.error('DB: Error persisting database:', persistError);
       // Don't throw - the data is still in memory
     }
-    
+
     if (analysisId) {
       // Save sections (limit to first 50 to avoid performance issues with 954 sections)
       if (structural_map && structural_map.sections) {
         const sectionsToSave = structural_map.sections.slice(0, 50);
-        console.log('DB: Saving', sectionsToSave.length, 'sections (limited from', structural_map.sections.length, ')');
+        console.log(
+          'DB: Saving',
+          sectionsToSave.length,
+          'sections (limited from',
+          structural_map.sections.length,
+          ')',
+        );
         sectionsToSave.forEach((section, idx) => {
           try {
             db.run(
@@ -286,7 +328,10 @@ function saveAnalysis(analysisData) {
         fs.writeFileSync(dbPath, buffer);
         console.log('DB: Database persisted after sections');
       } catch (persistError) {
-        console.error('DB: Error persisting database after sections:', persistError);
+        console.error(
+          'DB: Error persisting database after sections:',
+          persistError,
+        );
       }
 
       return analysisId;
@@ -315,9 +360,13 @@ function getAnalysis(fileHash) {
   stmt.free();
 
   if (row && row.id !== undefined) {
-    
-    let metadata, linear_analysis, structural_map, arrangement_flow, harmonic_context, polyrhythmic_layers;
-    
+    let metadata,
+      linear_analysis,
+      structural_map,
+      arrangement_flow,
+      harmonic_context,
+      polyrhythmic_layers;
+
     try {
       metadata = JSON.parse(row.metadata_json || '{}');
       linear_analysis = JSON.parse(row.linear_analysis_json || '{}');
@@ -337,7 +386,7 @@ function getAnalysis(fileHash) {
       });
       throw parseError;
     }
-    
+
     const analysis = {
       id: row.id,
       file_path: row.file_path || '',
@@ -350,7 +399,7 @@ function getAnalysis(fileHash) {
       harmonic_context,
       polyrhythmic_layers,
     };
-    
+
     console.log('DB: Analysis retrieved:', {
       id: analysis.id,
       hasLinearAnalysis: !!analysis.linear_analysis,
@@ -358,7 +407,7 @@ function getAnalysis(fileHash) {
       sectionCount: analysis.structural_map?.sections?.length || 0,
       eventCount: analysis.linear_analysis?.events?.length || 0,
     });
-    
+
     return analysis;
   }
 
@@ -366,8 +415,34 @@ function getAnalysis(fileHash) {
   return null;
 }
 
+function getAnalysisById(analysisId) {
+  console.log('DB: Getting analysis by id:', analysisId);
+  const stmt = db.prepare('SELECT * FROM AudioAnalysis WHERE id = ?');
+  stmt.bind([analysisId]);
+  let row = null;
+  if (stmt.step()) {
+    row = stmt.getAsObject();
+  }
+  stmt.free();
+  if (!row) return null;
+  return {
+    id: row.id,
+    file_path: row.file_path,
+    file_hash: row.file_hash,
+    metadata: JSON.parse(row.metadata_json || '{}'),
+    linear_analysis: JSON.parse(row.linear_analysis_json || '{}'),
+    structural_map: JSON.parse(row.structural_map_json || '{}'),
+    arrangement_flow: JSON.parse(row.arrangement_flow_json || '{}'),
+    harmonic_context: JSON.parse(row.harmonic_context_json || '{}'),
+    polyrhythmic_layers: JSON.parse(row.polyrhythmic_layers_json || '[]'),
+    created_at: row.created_at,
+  };
+}
+
 function getAnalysisSections(analysisId) {
-  const stmt = db.prepare('SELECT * FROM AnalysisSections WHERE analysis_id = ?');
+  const stmt = db.prepare(
+    'SELECT * FROM AnalysisSections WHERE analysis_id = ?',
+  );
   const sections = [];
   while (stmt.step()) {
     const row = stmt.getAsObject();
@@ -401,15 +476,192 @@ function saveUserSong(songData) {
     ],
   );
 
-  const stmt = db.prepare('SELECT id FROM UserSongs WHERE name = ? ORDER BY created_at DESC LIMIT 1');
+  const stmt = db.prepare(
+    'SELECT id FROM UserSongs WHERE name = ? ORDER BY created_at DESC LIMIT 1',
+  );
   const result = stmt.get([name]);
   stmt.free();
 
-  if (result && result.length > 0 && result[0] && result[0].values && result[0].values.length > 0 && result[0].values[0] && result[0].values[0].length > 0) {
+  if (
+    result &&
+    result.length > 0 &&
+    result[0] &&
+    result[0].values &&
+    result[0].values.length > 0 &&
+    result[0].values[0] &&
+    result[0].values[0].length > 0
+  ) {
     return result[0].values[0][0];
   }
 
   return null;
+}
+
+function saveProject(projectData) {
+  const {
+    uuid,
+    title,
+    artist,
+    bpm,
+    key_signature,
+    audio_path,
+    midi_path,
+    metadata,
+    status,
+  } = projectData;
+
+  db.run(
+    `INSERT INTO Projects (uuid, title, artist, bpm, key_signature, audio_path, midi_path, analysis_id, status, metadata_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      uuid,
+      title || '',
+      artist || '',
+      bpm || null,
+      key_signature || null,
+      audio_path || null,
+      midi_path || null,
+      projectData.analysis_id || null,
+      status || 'pending',
+      JSON.stringify(metadata || {}),
+      new Date().toISOString(),
+    ],
+  );
+
+  // Persist DB
+  const data = db.export();
+  const buffer = Buffer.from(data);
+  fs.writeFileSync(dbPath, buffer);
+
+  const stmt = db.prepare('SELECT id FROM Projects WHERE uuid = ?');
+  stmt.bind([uuid]);
+  let id = null;
+  if (stmt.step()) {
+    const row = stmt.getAsObject();
+    id = row.id;
+  }
+  stmt.free();
+
+  return id;
+}
+
+function getAllProjects() {
+  const stmt = db.prepare('SELECT * FROM Projects ORDER BY created_at DESC');
+  const results = [];
+  while (stmt.step()) {
+    const row = stmt.getAsObject();
+    results.push({
+      id: row.id,
+      uuid: row.uuid,
+      title: row.title,
+      artist: row.artist,
+      bpm: row.bpm,
+      key_signature: row.key_signature,
+      audio_path: row.audio_path,
+      midi_path: row.midi_path,
+      analysis_id: row.analysis_id,
+      status: row.status,
+      metadata: JSON.parse(row.metadata_json || '{}'),
+      created_at: row.created_at,
+    });
+  }
+  stmt.free();
+  return results;
+}
+
+function getProjectById(projectId) {
+  const stmt = db.prepare('SELECT * FROM Projects WHERE id = ?');
+  stmt.bind([projectId]);
+  let row = null;
+  if (stmt.step()) {
+    row = stmt.getAsObject();
+  }
+  stmt.free();
+  if (!row) return null;
+  return {
+    id: row.id,
+    uuid: row.uuid,
+    title: row.title,
+    artist: row.artist,
+    bpm: row.bpm,
+    key_signature: row.key_signature,
+    audio_path: row.audio_path,
+    midi_path: row.midi_path,
+    analysis_id: row.analysis_id,
+    status: row.status,
+    metadata: JSON.parse(row.metadata_json || '{}'),
+    created_at: row.created_at,
+  };
+}
+
+function deleteAnalysisById(analysisId) {
+  try {
+    db.run('DELETE FROM AnalysisSections WHERE analysis_id = ?', [analysisId]);
+    db.run('DELETE FROM AudioAnalysis WHERE id = ?', [analysisId]);
+    const data = db.export();
+    fs.writeFileSync(dbPath, Buffer.from(data));
+    return true;
+  } catch (error) {
+    console.error('DB: Error deleting analysis ID', analysisId, error);
+    return false;
+  }
+}
+
+function updateAnalysisById(analysisId, updated) {
+  try {
+    const {
+      linear_analysis,
+      metadata,
+      harmonic_context,
+      structural_map,
+      arrangement_flow,
+      polyrhythmic_layers,
+    } = updated;
+    db.run(
+      `UPDATE AudioAnalysis SET linear_analysis_json = ?, metadata_json = ?, harmonic_context_json = ?, structural_map_json = ?, arrangement_flow_json = ?, polyrhythmic_layers_json = ? WHERE id = ?`,
+      [
+        JSON.stringify(linear_analysis || {}),
+        JSON.stringify(metadata || {}),
+        JSON.stringify(harmonic_context || {}),
+        JSON.stringify(structural_map || {}),
+        JSON.stringify(arrangement_flow || {}),
+        JSON.stringify(polyrhythmic_layers || []),
+        analysisId,
+      ],
+    );
+    const data = db.export();
+    fs.writeFileSync(dbPath, Buffer.from(data));
+    return true;
+  } catch (error) {
+    console.error('DB: Error updating analysis ID', analysisId, error);
+    return false;
+  }
+}
+
+function updateProjectAnalysisId(projectId, analysisId) {
+  try {
+    db.run('UPDATE Projects SET analysis_id = ? WHERE id = ?', [
+      analysisId,
+      projectId,
+    ]);
+    const data = db.export();
+    fs.writeFileSync(dbPath, Buffer.from(data));
+    return true;
+  } catch (error) {
+    console.error('DB: Error updating project analysis id', error);
+    return false;
+  }
+}
+
+function attachMidiToProject(projectId, midiPath) {
+  db.run('UPDATE Projects SET midi_path = ? WHERE id = ?', [
+    midiPath,
+    projectId,
+  ]);
+  const data = db.export();
+  const buffer = Buffer.from(data);
+  fs.writeFileSync(dbPath, buffer);
+  return true;
 }
 
 module.exports = {
@@ -421,5 +673,12 @@ module.exports = {
   getAnalysis,
   getAnalysisSections,
   saveUserSong,
+  saveProject,
+  getAllProjects,
+  attachMidiToProject,
+  getProjectById,
+  deleteAnalysisById,
+  updateProjectAnalysisId,
+  updateAnalysisById,
+  getAnalysisById,
 };
-

@@ -6,6 +6,7 @@ import ArrangementBlock from '../components/ArrangementBlock';
 import SectionDetailPanel from '../components/SectionDetailPanel';
 import SectionSculptor from '../components/SectionSculptor';
 import SandboxMode from '../components/SandboxMode';
+import { HarmonicGrid } from '../components/grid/HarmonicGrid';
 
 export default function Architect() {
   const { blocks: remoteBlocks, setBlocks } = useAppIPC();
@@ -13,8 +14,10 @@ export default function Architect() {
   const [selectedId, setSelectedId] = React.useState(null);
   const [selectedSection, setSelectedSection] = React.useState(null);
   const [dragIndex, setDragIndex] = React.useState(null);
-  const [viewMode, setViewMode] = React.useState('arrangement'); // arrangement, detail, sandbox
+  const [viewMode, setViewMode] = React.useState('arrangement'); // arrangement, detail, sandbox, grid
   const [sandboxBlocks, setSandboxBlocks] = React.useState([]);
+  const [analysisData, setAnalysisData] = React.useState(null);
+  const [structuralMap, setStructuralMap] = React.useState(null);
 
   // produce a fixed-size grid (rows x cols)
   const cols = 4;
@@ -87,6 +90,78 @@ export default function Architect() {
     }
 
     setDragIndex(null);
+  }
+
+  // Load analysis data when available
+  React.useEffect(() => {
+    // Listen for analysis data from AnalysisJobManager
+    const handleAnalysisData = (event) => {
+      if (event.detail?.linear_analysis) {
+        setAnalysisData(event.detail.linear_analysis);
+      }
+      if (event.detail?.structural_map) {
+        setStructuralMap(event.detail.structural_map);
+      }
+    };
+
+    window.addEventListener('analysis:data', handleAnalysisData);
+    
+    // Also check if data is already in window
+    if (window.__lastAnalysisData) {
+      const data = window.__lastAnalysisData;
+      if (data.linear_analysis) setAnalysisData(data.linear_analysis);
+      if (data.structural_map) setStructuralMap(data.structural_map);
+    }
+
+    return () => {
+      window.removeEventListener('analysis:data', handleAnalysisData);
+    };
+  }, []);
+
+  // Harmonic Grid view
+  if (viewMode === 'grid') {
+    return (
+      <div style={{ height: '100vh', overflow: 'auto' }}>
+        <div style={{ padding: '16px', borderBottom: '1px solid #e5e7eb' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 style={{ margin: 0 }}>Harmonic Grid</h2>
+            <button
+              onClick={() => setViewMode('arrangement')}
+              style={{
+                padding: '6px 12px',
+                fontSize: '12px',
+                backgroundColor: '#6b7280',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+              }}
+            >
+              ← Back to Arrangement
+            </button>
+          </div>
+        </div>
+        <HarmonicGrid
+          linearAnalysis={analysisData}
+          structuralMap={structuralMap}
+          onBeatClick={(beat) => {
+            console.log('Beat clicked:', beat);
+          }}
+          onBeatEdit={(beat, newChord) => {
+            console.log('Beat edit:', beat, newChord);
+          }}
+          onSectionEdit={(section) => {
+            console.log('Section edit:', section);
+          }}
+          onSectionClone={(section) => {
+            console.log('Section clone:', section);
+          }}
+          onProgressionEdit={(progression) => {
+            console.log('Progression edit:', progression);
+          }}
+        />
+      </div>
+    );
   }
 
   // Three-level zoom interface
@@ -203,6 +278,21 @@ export default function Architect() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <h2 style={{ marginTop: 0 }}>Arrangement Grid (Level A)</h2>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <button
+              onClick={() => setViewMode('grid')}
+              style={{
+                padding: '6px 12px',
+                fontSize: '12px',
+                backgroundColor: '#7c3aed',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                marginRight: '8px',
+              }}
+            >
+              Harmonic Grid
+            </button>
             <button
               onClick={() => setViewMode('sandbox')}
               style={{

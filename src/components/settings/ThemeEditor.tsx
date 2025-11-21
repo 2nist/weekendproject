@@ -17,9 +17,21 @@ const THEME_TOKENS = [
     section: 'Harmony',
     items: [
       { label: 'Tonic (Stable)', cssVar: '--music-tonic', default: '#1e3a8a' },
-      { label: 'Dominant (Tension)', cssVar: '--music-dominant', default: '#7f1d1d' },
-      { label: 'Subdominant (Flow)', cssVar: '--music-subdominant', default: '#064e3b' },
-      { label: 'Diminished (Clash)', cssVar: '--music-diminished', default: '#581c87' },
+      {
+        label: 'Dominant (Tension)',
+        cssVar: '--music-dominant',
+        default: '#7f1d1d',
+      },
+      {
+        label: 'Subdominant (Flow)',
+        cssVar: '--music-subdominant',
+        default: '#064e3b',
+      },
+      {
+        label: 'Diminished (Clash)',
+        cssVar: '--music-diminished',
+        default: '#581c87',
+      },
     ],
   },
 ];
@@ -68,7 +80,9 @@ export const ThemeEditor: React.FC = () => {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Theme Editor</h2>
-          <p className="text-muted-foreground">Customize the visualization colors.</p>
+          <p className="text-muted-foreground">
+            Customize the visualization colors.
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={resetToDefaults}>
@@ -101,17 +115,24 @@ export const ThemeEditor: React.FC = () => {
             </CardHeader>
             <CardContent className="grid gap-4">
               {group.items.map((token) => (
-                <div key={token.cssVar} className="flex items-center justify-between">
+                <div
+                  key={token.cssVar}
+                  className="flex items-center justify-between"
+                >
                   <label className="text-sm font-medium">{token.label}</label>
                   <div className="flex items-center gap-2">
                     <input
                       type="color"
                       value={colors[token.cssVar] || token.default}
-                      onChange={(e) => handleColorChange(token.cssVar, e.target.value)}
+                      onChange={(e) =>
+                        handleColorChange(token.cssVar, e.target.value)
+                      }
                       aria-label={token.label}
                       className="w-12 h-8 p-1 cursor-pointer"
                     />
-                    <span className="text-xs font-mono text-muted-foreground w-16">{colors[token.cssVar] || token.default}</span>
+                    <span className="text-xs font-mono text-muted-foreground w-16">
+                      {colors[token.cssVar] || token.default}
+                    </span>
                   </div>
                 </div>
               ))}

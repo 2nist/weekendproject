@@ -31,4 +31,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 // Backwards-compatible alias for convenience in renderer code
 contextBridge.exposeInMainWorld('electron', {
   downloadYouTube: (url) => ipcRenderer.invoke('DOWNLOADER:DOWNLOAD', url),
+  recalcChords: (payload) =>
+    ipcRenderer.invoke('ANALYSIS:RECALC_CHORDS', payload),
 });

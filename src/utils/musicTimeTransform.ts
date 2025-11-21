@@ -96,6 +96,19 @@ export function transformAnalysisToGrid(
     ) {
       chordMap.set(roundedTime, wrapped);
     }
+    if (
+      wrapped &&
+      wrapped._chord_label &&
+      wrapped.source !== 'TS_Viterbi_Engine'
+    ) {
+      // Warn once per non-TS chord event so devs can detect 'Event Soup'
+      console.warn(
+        '⚠️ UI rendering non-Viterbi chord event detected at',
+        roundedTime,
+        wrapped.source,
+        wrapped._chord_label,
+      );
+    }
   });
 
   // If we have beat timestamps, use them for precise timing
@@ -152,8 +165,10 @@ export function transformAnalysisToGrid(
           }
         }
         if (closest && dist < 0.15) {
-          const hasKick = Array.isArray(closest.drums) && closest.drums.includes('kick');
-          const hasSnare = Array.isArray(closest.drums) && closest.drums.includes('snare');
+          const hasKick =
+            Array.isArray(closest.drums) && closest.drums.includes('kick');
+          const hasSnare =
+            Array.isArray(closest.drums) && closest.drums.includes('snare');
           return { hasKick, hasSnare, drums: closest.drums || [] };
         }
         return { hasKick: false, hasSnare: false, drums: [] };
@@ -274,7 +289,7 @@ export function transformAnalysisToGrid(
           measures: sectionMeasures,
           startTime: sectionStart,
           endTime: sectionEnd,
-          color: getSectionColor(section.section_label),
+          // color intentionally omitted; UI maps section_label -> theme color
         });
       }
     });

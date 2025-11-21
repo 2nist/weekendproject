@@ -62,6 +62,8 @@ def main():
         }],
         'postprocessor_args': ['-ar', '44100'],
         'prefer_ffmpeg': True,
+        # Impersonate Android client (helps bypass YouTube anti-bot checks)
+        'extractor_args': {'youtube': {'player_client': ['android']}},
     }
 
     try:

@@ -4,7 +4,7 @@ import { parseSectionLab, SectionSegment } from '../benchmarks/labParser';
 
 const metadataLookup = require('../electron/analysis/metadataLookup');
 const listener = require('../electron/analysis/listener');
-const architect = require('../electron/analysis/architect');
+const architect = require('../electron/analysis/architect_clean');
 const theorist = require('../electron/analysis/theorist');
 
 interface SongDefinition {
@@ -36,53 +36,144 @@ const SONGS: SongDefinition[] = [
   {
     id: 'come_together',
     title: 'Come Together',
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '01 Come Together.mp3'),
-    sectionPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '01_-_Come_Together.lab'),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '01 Come Together.mp3',
+    ),
+    sectionPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '01_-_Come_Together.lab',
+    ),
   },
   {
     id: 'eleanor_rigby',
     title: 'Eleanor Rigby',
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '02 Eleanor Rigby.mp3'),
-    sectionPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '02_-_Eleanor_Rigby.lab'),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '02 Eleanor Rigby.mp3',
+    ),
+    sectionPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '02_-_Eleanor_Rigby.lab',
+    ),
   },
   {
     id: 'maxwell',
     title: "Maxwell's Silver Hammer",
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', "03 Maxwell's Silver Hammer.mp3"),
-    sectionPath: path.resolve(ROOT, 'electron', 'analysis', 'test', "03_-_Maxwell's_Silver_Hammer.lab"),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      "03 Maxwell's Silver Hammer.mp3",
+    ),
+    sectionPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      "03_-_Maxwell's_Silver_Hammer.lab",
+    ),
   },
   {
     id: 'ob_la_di',
     title: 'Ob-La-Di, Ob-La-Da',
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '04 Ob-La-Di, Ob-La-Da.mp3'),
-    sectionPath: path.resolve(ROOT, 'electron', 'analysis', 'test', 'CD1_-_04_-_Ob-La-Di,_Ob-La-Da.lab'),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '04 Ob-La-Di, Ob-La-Da.mp3',
+    ),
+    sectionPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      'CD1_-_04_-_Ob-La-Di,_Ob-La-Da.lab',
+    ),
   },
   {
     id: 'let_it_be',
     title: 'Let It Be',
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '06 Let It Be.mp3'),
-    sectionPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '06_-_Let_It_Be.lab'),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '06 Let It Be.mp3',
+    ),
+    sectionPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '06_-_Let_It_Be.lab',
+    ),
   },
   {
     id: 'helter_skelter',
     title: 'Helter Skelter',
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '06 Helter Skelter.mp3'),
-    sectionPath: path.resolve(ROOT, 'electron', 'analysis', 'test', 'CD2_-_06_-_Helter_Skelter.lab'),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '06 Helter Skelter.mp3',
+    ),
+    sectionPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      'CD2_-_06_-_Helter_Skelter.lab',
+    ),
   },
   {
     id: 'day_in_the_life',
     title: 'A Day In The Life',
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '13 A Day In The Life.mp3'),
-    sectionPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '13_-_A_Day_In_The_Life.lab'),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '13 A Day In The Life.mp3',
+    ),
+    sectionPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '13_-_A_Day_In_The_Life.lab',
+    ),
   },
 ];
 
 async function analyzeSong(audioPath: string) {
   const metadata = metadataLookup.gatherMetadata(audioPath, {});
-  const analysisResult = await listener.analyzeAudio(audioPath, () => {}, metadata);
+  const analysisResult = await listener.analyzeAudio(
+    audioPath,
+    () => {},
+    metadata,
+  );
   const linearAnalysis = analysisResult.linear_analysis;
 
-  const structuralMap = await architect.analyzeStructure(linearAnalysis, () => {});
+  const structuralMap = await architect.analyzeStructure(
+    linearAnalysis,
+    () => {},
+  );
   const correctedStructuralMap = await theorist.correctStructuralMap(
     structuralMap,
     linearAnalysis,
@@ -116,7 +207,9 @@ function extractDetectedBoundaries(structuralMap: any): number[] {
   return unique;
 }
 
-function extractGroundTruthBoundaries(sectionSegments: SectionSegment[]): number[] {
+function extractGroundTruthBoundaries(
+  sectionSegments: SectionSegment[],
+): number[] {
   const boundaries: number[] = [0]; // Start is always a boundary
 
   sectionSegments.forEach((seg) => {
@@ -140,7 +233,14 @@ function extractGroundTruthBoundaries(sectionSegments: SectionSegment[]): number
 function calculateBoundaryFMeasure(
   detectedBoundaries: number[],
   groundTruthBoundaries: number[],
-): { fScore: number; precision: number; recall: number; hits: number; misses: number; ghosts: number } {
+): {
+  fScore: number;
+  precision: number;
+  recall: number;
+  hits: number;
+  misses: number;
+  ghosts: number;
+} {
   const tolerance = TOLERANCE_SECONDS;
   let hits = 0;
   let misses = 0;
@@ -173,21 +273,32 @@ function calculateBoundaryFMeasure(
   }
 
   // Calculate precision and recall
-  const precision = detectedBoundaries.length > 0 ? hits / detectedBoundaries.length : 0;
-  const recall = groundTruthBoundaries.length > 0 ? hits / groundTruthBoundaries.length : 0;
+  const precision =
+    detectedBoundaries.length > 0 ? hits / detectedBoundaries.length : 0;
+  const recall =
+    groundTruthBoundaries.length > 0 ? hits / groundTruthBoundaries.length : 0;
 
   // F-Measure (F1 Score)
-  const fScore = precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0;
+  const fScore =
+    precision + recall > 0
+      ? (2 * precision * recall) / (precision + recall)
+      : 0;
 
   return { fScore, precision, recall, hits, misses, ghosts };
 }
 
-function calculateFragmentationIndex(detectedCount: number, groundTruthCount: number): number {
+function calculateFragmentationIndex(
+  detectedCount: number,
+  groundTruthCount: number,
+): number {
   if (groundTruthCount === 0) return detectedCount > 0 ? Infinity : 1.0;
   return detectedCount / groundTruthCount;
 }
 
-function determineStatus(fScore: number, fragmentationIndex: number): 'PASS' | 'FAIL' | 'WARN' {
+function determineStatus(
+  fScore: number,
+  fragmentationIndex: number,
+): 'PASS' | 'FAIL' | 'WARN' {
   if (fScore >= 0.8 && fragmentationIndex >= 0.8 && fragmentationIndex <= 1.2) {
     return 'PASS';
   }
@@ -208,7 +319,10 @@ function getStatusIcon(status: 'PASS' | 'FAIL' | 'WARN'): string {
   }
 }
 
-function getStatusLabel(status: 'PASS' | 'FAIL' | 'WARN', fragmentationIndex: number): string {
+function getStatusLabel(
+  status: 'PASS' | 'FAIL' | 'WARN',
+  fragmentationIndex: number,
+): string {
   if (status === 'PASS') return 'PASS';
   if (fragmentationIndex > 1.5) return 'FAIL (Over-segmented)';
   if (fragmentationIndex < 0.5) return 'FAIL (Under-segmented)';
@@ -236,17 +350,16 @@ async function testSong(song: SongDefinition): Promise<StructureMetrics> {
 
   // Load ground truth
   const groundTruthSections = parseSectionLab(song.sectionPath);
-  const groundTruthBoundaries = extractGroundTruthBoundaries(groundTruthSections);
+  const groundTruthBoundaries =
+    extractGroundTruthBoundaries(groundTruthSections);
 
   // Run analysis
   const structuralMap = await analyzeSong(song.audioPath);
   const detectedBoundaries = extractDetectedBoundaries(structuralMap);
 
   // Calculate metrics
-  const { fScore, precision, recall, hits, misses, ghosts } = calculateBoundaryFMeasure(
-    detectedBoundaries,
-    groundTruthBoundaries,
-  );
+  const { fScore, precision, recall, hits, misses, ghosts } =
+    calculateBoundaryFMeasure(detectedBoundaries, groundTruthBoundaries);
 
   const fragmentationIndex = calculateFragmentationIndex(
     detectedBoundaries.length,
@@ -277,7 +390,7 @@ function printReport(results: StructureMetrics[]) {
   console.log('='.repeat(80));
   console.log(`Tolerance: ±${TOLERANCE_SECONDS} seconds`);
   console.log('\n' + '-'.repeat(80));
-  
+
   // Header
   const header = [
     'SONG'.padEnd(30),
@@ -294,7 +407,10 @@ function printReport(results: StructureMetrics[]) {
     const fScore = result.fScore.toFixed(2).padEnd(8);
     const fragIndex = result.fragmentationIndex.toFixed(2).padEnd(12);
     const statusIcon = getStatusIcon(result.status);
-    const statusLabel = getStatusLabel(result.status, result.fragmentationIndex);
+    const statusLabel = getStatusLabel(
+      result.status,
+      result.fragmentationIndex,
+    );
     const status = `${statusIcon} ${statusLabel}`.padEnd(25);
 
     console.log([title, fScore, fragIndex, status].join(' | '));
@@ -303,8 +419,10 @@ function printReport(results: StructureMetrics[]) {
   console.log('-'.repeat(80));
 
   // Summary statistics
-  const avgFScore = results.reduce((sum, r) => sum + r.fScore, 0) / results.length;
-  const avgFragIndex = results.reduce((sum, r) => sum + r.fragmentationIndex, 0) / results.length;
+  const avgFScore =
+    results.reduce((sum, r) => sum + r.fScore, 0) / results.length;
+  const avgFragIndex =
+    results.reduce((sum, r) => sum + r.fragmentationIndex, 0) / results.length;
   const passCount = results.filter((r) => r.status === 'PASS').length;
   const failCount = results.filter((r) => r.status === 'FAIL').length;
   const warnCount = results.filter((r) => r.status === 'WARN').length;
@@ -315,7 +433,9 @@ function printReport(results: StructureMetrics[]) {
   console.log(`  Pass: ${passCount} | Warn: ${warnCount} | Fail: ${failCount}`);
 
   // Detailed breakdown for failed songs
-  const failedSongs = results.filter((r) => r.status === 'FAIL' || r.fragmentationIndex > 1.5);
+  const failedSongs = results.filter(
+    (r) => r.status === 'FAIL' || r.fragmentationIndex > 1.5,
+  );
   if (failedSongs.length > 0) {
     console.log('\n' + '='.repeat(80));
     console.log('DETAILED BREAKDOWN (Failed/Over-segmented Songs)');
@@ -323,10 +443,16 @@ function printReport(results: StructureMetrics[]) {
 
     for (const result of failedSongs) {
       console.log(`\n${result.title}:`);
-      console.log(`  F-Score: ${result.fScore.toFixed(3)} (Precision: ${result.precision.toFixed(3)}, Recall: ${result.recall.toFixed(3)})`);
-      console.log(`  Boundaries: ${result.hits} hits, ${result.misses} misses, ${result.ghosts} ghosts`);
-      console.log(`  Fragmentation: ${result.detectedCount} detected / ${result.groundTruthCount} expected = ${result.fragmentationIndex.toFixed(2)}`);
-      
+      console.log(
+        `  F-Score: ${result.fScore.toFixed(3)} (Precision: ${result.precision.toFixed(3)}, Recall: ${result.recall.toFixed(3)})`,
+      );
+      console.log(
+        `  Boundaries: ${result.hits} hits, ${result.misses} misses, ${result.ghosts} ghosts`,
+      );
+      console.log(
+        `  Fragmentation: ${result.detectedCount} detected / ${result.groundTruthCount} expected = ${result.fragmentationIndex.toFixed(2)}`,
+      );
+
       const suggestion = generateSuggestion(result);
       if (suggestion) {
         console.log(`  ${suggestion}`);
@@ -355,10 +481,14 @@ function printReport(results: StructureMetrics[]) {
     console.log('\n' + '='.repeat(80));
     console.log('REFINEMENT HINTS');
     console.log('='.repeat(80));
-    
+
     for (const result of overSegmented) {
-      console.log(`\n${result.title} (Fragmentation Index: ${result.fragmentationIndex.toFixed(2)}):`);
-      console.log(`  Suggestion: Increase MIN_SECTION_DURATION or NOVELTY_THRESHOLD in architect.js`);
+      console.log(
+        `\n${result.title} (Fragmentation Index: ${result.fragmentationIndex.toFixed(2)}):`,
+      );
+      console.log(
+        `  Suggestion: Increase MIN_SECTION_DURATION or NOVELTY_THRESHOLD in architect.js`,
+      );
     }
   }
 
@@ -372,11 +502,16 @@ function printReport(results: StructureMetrics[]) {
   for (const result of results) {
     if (result.status !== 'PASS' && result.groundTruthCount > 0) {
       const maxWidth = 60;
-      const scale = maxWidth / Math.max(result.groundTruthCount, result.detectedCount);
-      
+      const scale =
+        maxWidth / Math.max(result.groundTruthCount, result.detectedCount);
+
       console.log(`${result.title}:`);
-      console.log(`  GT: ${'█'.repeat(Math.round(result.groundTruthCount * scale))} (${result.groundTruthCount} sections)`);
-      console.log(`  DT: ${'█'.repeat(Math.round(result.detectedCount * scale))} (${result.detectedCount} sections)`);
+      console.log(
+        `  GT: ${'█'.repeat(Math.round(result.groundTruthCount * scale))} (${result.groundTruthCount} sections)`,
+      );
+      console.log(
+        `  DT: ${'█'.repeat(Math.round(result.detectedCount * scale))} (${result.detectedCount} sections)`,
+      );
       console.log('');
     }
   }
@@ -425,7 +560,12 @@ async function main() {
   console.log = originalLog;
 
   // Save report to file
-  const reportPath = path.resolve(ROOT, 'benchmarks', 'results', 'structure-test-report.txt');
+  const reportPath = path.resolve(
+    ROOT,
+    'benchmarks',
+    'results',
+    'structure-test-report.txt',
+  );
   const reportDir = path.dirname(reportPath);
   if (!fs.existsSync(reportDir)) {
     fs.mkdirSync(reportDir, { recursive: true });
@@ -444,4 +584,3 @@ main().catch((error) => {
   console.error('Structure test failed:', error);
   process.exit(1);
 });
-

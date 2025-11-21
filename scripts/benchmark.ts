@@ -10,7 +10,7 @@ import {
 
 const metadataLookup = require('../electron/analysis/metadataLookup');
 const listener = require('../electron/analysis/listener');
-const architect = require('../electron/analysis/architect');
+const architect = require('../electron/analysis/architect_clean');
 const theorist = require('../electron/analysis/theorist');
 
 interface SongDefinition {
@@ -73,32 +73,88 @@ interface AnalyzerConfig {
 }
 
 const ROOT = path.resolve(__dirname, '..');
-const ANALYZER_CONFIG_PATH = path.resolve(ROOT, 'electron', 'analysis', 'audioAnalyzerConfig.json');
+const ANALYZER_CONFIG_PATH = path.resolve(
+  ROOT,
+  'electron',
+  'analysis',
+  'audioAnalyzerConfig.json',
+);
 const BENCHMARK_RESULTS_DIR = path.resolve(ROOT, 'benchmarks', 'results');
-const BENCHMARK_HISTORY_FILE = path.resolve(BENCHMARK_RESULTS_DIR, 'history.json');
+const BENCHMARK_HISTORY_FILE = path.resolve(
+  BENCHMARK_RESULTS_DIR,
+  'history.json',
+);
 
 const SONGS: SongDefinition[] = [
   {
     id: 'come_together',
     title: 'Come Together',
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '01 Come Together.mp3'),
-    sectionPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '01_-_Come_Together.lab'),
-    chordPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '01_-_Come_Together_chord.lab'),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '01 Come Together.mp3',
+    ),
+    sectionPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '01_-_Come_Together.lab',
+    ),
+    chordPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '01_-_Come_Together_chord.lab',
+    ),
     referenceKey: 'D:min',
   },
   {
     id: 'eleanor_rigby',
     title: 'Eleanor Rigby',
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '02 Eleanor Rigby.mp3'),
-    sectionPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '02_-_Eleanor_Rigby.lab'),
-    chordPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '02_-_Eleanor_Rigby_chord.lab'),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '02 Eleanor Rigby.mp3',
+    ),
+    sectionPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '02_-_Eleanor_Rigby.lab',
+    ),
+    chordPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '02_-_Eleanor_Rigby_chord.lab',
+    ),
     referenceKey: 'E:min',
   },
   {
     id: 'maxwell',
     title: "Maxwell's Silver Hammer",
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', "03 Maxwell's Silver Hammer.mp3"),
-    sectionPath: path.resolve(ROOT, 'electron', 'analysis', 'test', "03_-_Maxwell's_Silver_Hammer.lab"),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      "03 Maxwell's Silver Hammer.mp3",
+    ),
+    sectionPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      "03_-_Maxwell's_Silver_Hammer.lab",
+    ),
     chordPath: path.resolve(
       ROOT,
       'electron',
@@ -111,7 +167,13 @@ const SONGS: SongDefinition[] = [
   {
     id: 'ob_la_di',
     title: 'Ob-La-Di, Ob-La-Da',
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '04 Ob-La-Di, Ob-La-Da.mp3'),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '04 Ob-La-Di, Ob-La-Da.mp3',
+    ),
     sectionPath: path.resolve(
       ROOT,
       'electron',
@@ -131,15 +193,39 @@ const SONGS: SongDefinition[] = [
   {
     id: 'let_it_be',
     title: 'Let It Be',
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '06 Let It Be.mp3'),
-    sectionPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '06_-_Let_It_Be.lab'),
-    chordPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '06_-_Let_It_Be_chord.lab'),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '06 Let It Be.mp3',
+    ),
+    sectionPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '06_-_Let_It_Be.lab',
+    ),
+    chordPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '06_-_Let_It_Be_chord.lab',
+    ),
     referenceKey: 'C:maj',
   },
   {
     id: 'helter_skelter',
     title: 'Helter Skelter',
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '06 Helter Skelter.mp3'),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '06 Helter Skelter.mp3',
+    ),
     sectionPath: path.resolve(
       ROOT,
       'electron',
@@ -159,8 +245,20 @@ const SONGS: SongDefinition[] = [
   {
     id: 'day_in_the_life',
     title: 'A Day In The Life',
-    audioPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '13 A Day In The Life.mp3'),
-    sectionPath: path.resolve(ROOT, 'electron', 'analysis', 'test', '13_-_A_Day_In_The_Life.lab'),
+    audioPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '13 A Day In The Life.mp3',
+    ),
+    sectionPath: path.resolve(
+      ROOT,
+      'electron',
+      'analysis',
+      'test',
+      '13_-_A_Day_In_The_Life.lab',
+    ),
     chordPath: path.resolve(
       ROOT,
       'electron',
@@ -174,10 +272,17 @@ const SONGS: SongDefinition[] = [
 
 async function analyzeSong(audioPath: string) {
   const metadata = metadataLookup.gatherMetadata(audioPath, {});
-  const analysisResult = await listener.analyzeAudio(audioPath, () => {}, metadata);
+  const analysisResult = await listener.analyzeAudio(
+    audioPath,
+    () => {},
+    metadata,
+  );
   const linearAnalysis = analysisResult.linear_analysis;
 
-  const structuralMap = await architect.analyzeStructure(linearAnalysis, () => {});
+  const structuralMap = await architect.analyzeStructure(
+    linearAnalysis,
+    () => {},
+  );
   const correctedStructuralMap = await theorist.correctStructuralMap(
     structuralMap,
     linearAnalysis,
@@ -195,8 +300,10 @@ async function analyzeSong(audioPath: string) {
 }
 
 function buildHarmonicContext(linearAnalysis: any, metadata: any) {
-  const detectedKey = linearAnalysis?.metadata?.detected_key || metadata?.key_hint || 'C';
-  const detectedMode = linearAnalysis?.metadata?.detected_mode || metadata?.mode_hint || 'major';
+  const detectedKey =
+    linearAnalysis?.metadata?.detected_key || metadata?.key_hint || 'C';
+  const detectedMode =
+    linearAnalysis?.metadata?.detected_mode || metadata?.mode_hint || 'major';
 
   return {
     global_key: {
@@ -252,13 +359,16 @@ function scoreSong(
 ): BenchmarkMetrics {
   const keyRatio = computeKeyScore(engineAnalysis, song.referenceKey);
   const chordRatio = computeChordOverlap(engineAnalysis, chordSegments);
-  const segmentRatio = computeSegmentationScore(engineAnalysis, sectionSegments);
+  const segmentRatio = computeSegmentationScore(
+    engineAnalysis,
+    sectionSegments,
+  );
 
   // Weighted scoring: Higher weight to Key (40%) and Structure (30%), Chord (30%)
   // This reflects the importance of correct key detection and structure segmentation
-  const keyWeight = 0.40;
-  const structureWeight = 0.30;
-  const chordWeight = 0.30;
+  const keyWeight = 0.4;
+  const structureWeight = 0.3;
+  const chordWeight = 0.3;
 
   const keyScore = keyRatio >= 0.999 ? 100 : 0; // Binary: correct = 100, wrong = 0
   const chordScore = chordRatio * 100;
@@ -266,9 +376,9 @@ function scoreSong(
 
   // Weighted total score (0-100)
   const totalScore = Math.round(
-    keyScore * keyWeight + 
-    chordScore * chordWeight + 
-    segmentScore * structureWeight
+    keyScore * keyWeight +
+      chordScore * chordWeight +
+      segmentScore * structureWeight,
   );
 
   // Legacy scores for backward compatibility
@@ -292,7 +402,10 @@ function computeKeyScore(engineAnalysis: any, referenceKey?: string): number {
   if (!expectedKey) return 0;
 
   const engineKeyObj = engineAnalysis?.harmonic_context?.global_key || {};
-  const engineKeyLabel = buildKeyLabel(engineKeyObj.primary_key, engineKeyObj.mode);
+  const engineKeyLabel = buildKeyLabel(
+    engineKeyObj.primary_key,
+    engineKeyObj.mode,
+  );
   const engineKey = normalizeChordLabel(engineKeyLabel || '');
   if (!engineKey) return 0;
   return engineKey === expectedKey ? 1 : 0;
@@ -309,7 +422,10 @@ function buildKeyLabel(root?: string, mode?: string) {
   return `${normalizedRoot}:maj`;
 }
 
-function computeChordOverlap(engineAnalysis: any, chordSegments: ChordSegment[]): number {
+function computeChordOverlap(
+  engineAnalysis: any,
+  chordSegments: ChordSegment[],
+): number {
   const labChords = chordSegments.filter((seg) => seg.normalizedChord);
   const engineChordTimeline = buildEngineChordTimeline(engineAnalysis);
 
@@ -322,7 +438,12 @@ function computeChordOverlap(engineAnalysis: any, chordSegments: ChordSegment[])
 
   for (const labSeg of labChords) {
     for (const engSeg of engineChordTimeline) {
-      const overlap = getOverlap(labSeg.start, labSeg.end, engSeg.start, engSeg.end);
+      const overlap = getOverlap(
+        labSeg.start,
+        labSeg.end,
+        engSeg.start,
+        engSeg.end,
+      );
       if (overlap <= 0) continue;
 
       totalOverlap += overlap;
@@ -335,10 +456,16 @@ function computeChordOverlap(engineAnalysis: any, chordSegments: ChordSegment[])
   return totalOverlap > 0 ? matchedOverlap / totalOverlap : 0;
 }
 
-function computeSegmentationScore(engineAnalysis: any, sectionSegments: SectionSegment[]): number {
+function computeSegmentationScore(
+  engineAnalysis: any,
+  sectionSegments: SectionSegment[],
+): number {
   const labBoundaries = sectionSegments
     .map((seg) => seg.start)
-    .filter((value, index, array) => value > 0 && (index === 0 || value !== array[index - 1]));
+    .filter(
+      (value, index, array) =>
+        value > 0 && (index === 0 || value !== array[index - 1]),
+    );
 
   if (!labBoundaries.length) {
     return 0;
@@ -352,7 +479,11 @@ function computeSegmentationScore(engineAnalysis: any, sectionSegments: SectionS
   const tolerance = 2; // seconds
   let matched = 0;
   labBoundaries.forEach((boundary) => {
-    if (sectionBoundaries.some((candidate) => Math.abs(candidate - boundary) <= tolerance)) {
+    if (
+      sectionBoundaries.some(
+        (candidate) => Math.abs(candidate - boundary) <= tolerance,
+      )
+    ) {
       matched += 1;
     }
   });
@@ -363,7 +494,10 @@ function computeSegmentationScore(engineAnalysis: any, sectionSegments: SectionS
 function buildEngineChordTimeline(engineAnalysis: any) {
   const events = engineAnalysis?.linear_analysis?.events || [];
   const chordEvents = events
-    .filter((event: any) => event.event_type === 'chord_candidate' && event.chord_candidate)
+    .filter(
+      (event: any) =>
+        event.event_type === 'chord_candidate' && event.chord_candidate,
+    )
     .map((event: any) => ({
       timestamp: event.timestamp || 0,
       chord: formatChordCandidate(event.chord_candidate),
@@ -373,7 +507,8 @@ function buildEngineChordTimeline(engineAnalysis: any) {
 
   const duration =
     engineAnalysis?.linear_analysis?.metadata?.duration_seconds ||
-    (chordEvents[chordEvents.length - 1]?.timestamp || 0);
+    chordEvents[chordEvents.length - 1]?.timestamp ||
+    0;
 
   const segments: { start: number; end: number; chord: string }[] = [];
   for (let i = 0; i < chordEvents.length; i++) {
@@ -403,11 +538,19 @@ function collectSectionBoundaries(engineAnalysis: any): number[] {
   const sections = engineAnalysis?.structural_map?.sections || [];
   const boundaries = sections
     .map((section: any) => section?.time_range?.start_time ?? 0)
-    .filter((value: number, index: number, array: number[]) => index === 0 || value !== array[index - 1]);
+    .filter(
+      (value: number, index: number, array: number[]) =>
+        index === 0 || value !== array[index - 1],
+    );
   return boundaries.sort((a: number, b: number) => a - b);
 }
 
-function getOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number) {
+function getOverlap(
+  aStart: number,
+  aEnd: number,
+  bStart: number,
+  bEnd: number,
+) {
   const start = Math.max(aStart, bStart);
   const end = Math.min(aEnd, bEnd);
   return Math.max(0, end - start);
@@ -422,14 +565,16 @@ function chordMatches(engineChord: string, labChord: string): boolean {
 }
 
 function printReport(results: BenchmarkMetrics[], label: string) {
-  console.log(`\n${label} Results (Weighted Scoring: Key 40%, Chord 30%, Structure 30%):`);
+  console.log(
+    `\n${label} Results (Weighted Scoring: Key 40%, Chord 30%, Structure 30%):`,
+  );
   const table = results.map((result) => ({
     Song: result.title,
-    'Key': result.keyScore > 0 ? '✓' : '✗',
+    Key: result.keyScore > 0 ? '✓' : '✗',
     'Key Pts': result.keyScore,
     'Chord %': `${(result.chordRatio * 100).toFixed(1)}%`,
     'Segments %': `${(result.segmentRatio * 100).toFixed(1)}%`,
-    'Weighted': result.totalScore,
+    Weighted: result.totalScore,
   }));
   console.table(table);
 
@@ -437,17 +582,27 @@ function printReport(results: BenchmarkMetrics[], label: string) {
   const summary = calculateSummary(results);
   console.log(`\n${label} Summary:`);
   console.log(`  Average Key Score: ${summary.avgKeyScore.toFixed(1)}`);
-  console.log(`  Average Chord Ratio: ${(summary.avgChordRatio * 100).toFixed(1)}%`);
-  console.log(`  Average Segment Ratio: ${(summary.avgSegmentRatio * 100).toFixed(1)}%`);
+  console.log(
+    `  Average Chord Ratio: ${(summary.avgChordRatio * 100).toFixed(1)}%`,
+  );
+  console.log(
+    `  Average Segment Ratio: ${(summary.avgSegmentRatio * 100).toFixed(1)}%`,
+  );
   console.log(`  Average Total Score: ${summary.avgTotalScore.toFixed(1)}`);
-  console.log(`  Songs Passed (Total > 50): ${summary.songsPassed}/${summary.songsTotal}`);
+  console.log(
+    `  Songs Passed (Total > 50): ${summary.songsPassed}/${summary.songsTotal}`,
+  );
 }
 
 function calculateSummary(results: BenchmarkMetrics[]) {
-  const avgKeyScore = results.reduce((sum, r) => sum + r.keyScore, 0) / results.length;
-  const avgChordRatio = results.reduce((sum, r) => sum + r.chordRatio, 0) / results.length;
-  const avgSegmentRatio = results.reduce((sum, r) => sum + r.segmentRatio, 0) / results.length;
-  const avgTotalScore = results.reduce((sum, r) => sum + r.totalScore, 0) / results.length;
+  const avgKeyScore =
+    results.reduce((sum, r) => sum + r.keyScore, 0) / results.length;
+  const avgChordRatio =
+    results.reduce((sum, r) => sum + r.chordRatio, 0) / results.length;
+  const avgSegmentRatio =
+    results.reduce((sum, r) => sum + r.segmentRatio, 0) / results.length;
+  const avgTotalScore =
+    results.reduce((sum, r) => sum + r.totalScore, 0) / results.length;
   const songsPassed = results.filter((r) => r.totalScore > 50).length;
 
   return {
@@ -460,7 +615,11 @@ function calculateSummary(results: BenchmarkMetrics[]) {
   };
 }
 
-function saveResults(results: BenchmarkMetrics[], label: string, config: AnalyzerConfig) {
+function saveResults(
+  results: BenchmarkMetrics[],
+  label: string,
+  config: AnalyzerConfig,
+) {
   // Ensure results directory exists
   if (!fs.existsSync(BENCHMARK_RESULTS_DIR)) {
     fs.mkdirSync(BENCHMARK_RESULTS_DIR, { recursive: true });
@@ -477,7 +636,10 @@ function saveResults(results: BenchmarkMetrics[], label: string, config: Analyze
   }));
 
   // Save individual run
-  const runFile = path.resolve(BENCHMARK_RESULTS_DIR, `run_${timestamp.replace(/[:.]/g, '-')}.json`);
+  const runFile = path.resolve(
+    BENCHMARK_RESULTS_DIR,
+    `run_${timestamp.replace(/[:.]/g, '-')}.json`,
+  );
   fs.writeFileSync(
     runFile,
     JSON.stringify(
@@ -522,7 +684,10 @@ function saveResults(results: BenchmarkMetrics[], label: string, config: Analyze
   console.log(`History updated: ${BENCHMARK_HISTORY_FILE}`);
 }
 
-function detectRegressions(current: BenchmarkMetrics[], threshold = 0.1): RegressionAlert[] {
+function detectRegressions(
+  current: BenchmarkMetrics[],
+  threshold = 0.1,
+): RegressionAlert[] {
   const alerts: RegressionAlert[] = [];
 
   if (!fs.existsSync(BENCHMARK_HISTORY_FILE)) {
@@ -530,7 +695,9 @@ function detectRegressions(current: BenchmarkMetrics[], threshold = 0.1): Regres
   }
 
   try {
-    const history: BenchmarkHistory = JSON.parse(fs.readFileSync(BENCHMARK_HISTORY_FILE, 'utf8'));
+    const history: BenchmarkHistory = JSON.parse(
+      fs.readFileSync(BENCHMARK_HISTORY_FILE, 'utf8'),
+    );
     if (history.runs.length < 2) {
       return alerts; // Need at least one previous run
     }
@@ -540,22 +707,22 @@ function detectRegressions(current: BenchmarkMetrics[], threshold = 0.1): Regres
     const previousResults = previousRun.results;
 
     for (const currentResult of current) {
-      const previousResult = previousResults.find((r) => r.songId === currentResult.songId);
+      const previousResult = previousResults.find(
+        (r) => r.songId === currentResult.songId,
+      );
       if (!previousResult) continue;
 
       // Check each metric
-      const metrics: Array<'keyScore' | 'chordRatio' | 'segmentRatio' | 'totalScore'> = [
-        'keyScore',
-        'chordRatio',
-        'segmentRatio',
-        'totalScore',
-      ];
+      const metrics: Array<
+        'keyScore' | 'chordRatio' | 'segmentRatio' | 'totalScore'
+      > = ['keyScore', 'chordRatio', 'segmentRatio', 'totalScore'];
 
       for (const metric of metrics) {
         const prev = previousResult[metric];
         const curr = currentResult[metric];
         const change = curr - prev;
-        const changePercent = prev !== 0 ? Math.abs(change / prev) : Math.abs(change);
+        const changePercent =
+          prev !== 0 ? Math.abs(change / prev) : Math.abs(change);
 
         // Alert if significant regression (more than threshold decrease)
         if (change < 0 && changePercent > threshold) {
@@ -615,14 +782,21 @@ async function optimizeEngine(baseline: BenchmarkMetrics[]): Promise<void> {
     // Eleanor Rigby: No drums - needs higher onset sensitivity for string attacks
     if (eleanor && eleanor.segmentRatio < 0.5) {
       if (config.onset_sensitivity < 0.8) {
-        config.onset_sensitivity = Math.min(0.9, config.onset_sensitivity + 0.1);
-        console.log(`✓ Eleanor Rigby: Increased onset_sensitivity to ${config.onset_sensitivity} for string attack detection`);
+        config.onset_sensitivity = Math.min(
+          0.9,
+          config.onset_sensitivity + 0.1,
+        );
+        console.log(
+          `✓ Eleanor Rigby: Increased onset_sensitivity to ${config.onset_sensitivity} for string attack detection`,
+        );
         modified = true;
       }
       // Try Degara method if multifeature fails
       if (config.rhythm_method === 'multifeature' && eleanor.totalScore < 30) {
         config.rhythm_method = 'degara';
-        console.log(`✓ Eleanor Rigby: Switched rhythm_method to 'degara' for non-percussive rhythm`);
+        console.log(
+          `✓ Eleanor Rigby: Switched rhythm_method to 'degara' for non-percussive rhythm`,
+        );
         modified = true;
       }
     }
@@ -630,8 +804,13 @@ async function optimizeEngine(baseline: BenchmarkMetrics[]): Promise<void> {
     // Helter Skelter: Distortion/noise - needs spectral whitening
     if (helter && helter.chordRatio < 0.3) {
       if (config.spectral_whitening < 0.5) {
-        config.spectral_whitening = Math.min(0.7, config.spectral_whitening + 0.2);
-        console.log(`✓ Helter Skelter: Increased spectral_whitening to ${config.spectral_whitening} to remove noise floor`);
+        config.spectral_whitening = Math.min(
+          0.7,
+          config.spectral_whitening + 0.2,
+        );
+        console.log(
+          `✓ Helter Skelter: Increased spectral_whitening to ${config.spectral_whitening} to remove noise floor`,
+        );
         modified = true;
       }
     }
@@ -642,18 +821,31 @@ async function optimizeEngine(baseline: BenchmarkMetrics[]): Promise<void> {
       // If too many sections detected (ratio > 1.5x expected), increase threshold
       if (sections > 0.8 || dayInLife.totalScore < 20) {
         if (config.novelty_threshold < 0.3) {
-          config.novelty_threshold = Math.min(0.4, config.novelty_threshold + 0.05);
-          console.log(`✓ A Day In The Life: Increased novelty_threshold to ${config.novelty_threshold} to reduce false positives`);
+          config.novelty_threshold = Math.min(
+            0.4,
+            config.novelty_threshold + 0.05,
+          );
+          console.log(
+            `✓ A Day In The Life: Increased novelty_threshold to ${config.novelty_threshold} to reduce false positives`,
+          );
           modified = true;
         }
       }
     }
 
     // Maxwell & Ob-La-Di: Major keys with chromatic passing chords
-    if ((maxwell && maxwell.keyScore === 0) || (obLaDi && obLaDi.keyScore === 0)) {
+    if (
+      (maxwell && maxwell.keyScore === 0) ||
+      (obLaDi && obLaDi.keyScore === 0)
+    ) {
       if (config.key_detection_major_bias < 0.3) {
-        config.key_detection_major_bias = Math.min(0.4, config.key_detection_major_bias + 0.1);
-        console.log(`✓ Maxwell/Ob-La-Di: Increased key_detection_major_bias to ${config.key_detection_major_bias} for chromatic tolerance`);
+        config.key_detection_major_bias = Math.min(
+          0.4,
+          config.key_detection_major_bias + 0.1,
+        );
+        console.log(
+          `✓ Maxwell/Ob-La-Di: Increased key_detection_major_bias to ${config.key_detection_major_bias} for chromatic tolerance`,
+        );
         modified = true;
       }
     }
@@ -661,22 +853,34 @@ async function optimizeEngine(baseline: BenchmarkMetrics[]): Promise<void> {
     // Ob-La-Di: Fast harmonic rhythm (chords change every 2 beats)
     if (obLaDi && obLaDi.chordRatio < 0.4) {
       if (config.chord_duration_min > 0.5) {
-        config.chord_duration_min = Math.max(0.3, config.chord_duration_min - 0.2);
-        console.log(`✓ Ob-La-Di: Decreased chord_duration_min to ${config.chord_duration_min} for fast harmonic rhythm`);
+        config.chord_duration_min = Math.max(
+          0.3,
+          config.chord_duration_min - 0.2,
+        );
+        console.log(
+          `✓ Ob-La-Di: Decreased chord_duration_min to ${config.chord_duration_min} for fast harmonic rhythm`,
+        );
         modified = true;
       }
     }
 
     // Maxwell: Complex harmonic movement
     if (maxwell && maxwell.chordRatio < 0.5) {
-      config.chroma_smoothing_window = Math.max(1, Math.round(config.chroma_smoothing_window * 0.9));
-      console.log(`✓ Maxwell: Adjusted chroma_smoothing_window to ${config.chroma_smoothing_window} for complex harmony`);
+      config.chroma_smoothing_window = Math.max(
+        1,
+        Math.round(config.chroma_smoothing_window * 0.9),
+      );
+      console.log(
+        `✓ Maxwell: Adjusted chroma_smoothing_window to ${config.chroma_smoothing_window} for complex harmony`,
+      );
       modified = true;
     }
 
     // Control: Let It Be should not regress
     if (letItBe && letItBe.totalScore < 40 && iteration > 1) {
-      console.log(`⚠️  Let It Be (control) regressed to ${letItBe.totalScore}. Stopping optimization.`);
+      console.log(
+        `⚠️  Let It Be (control) regressed to ${letItBe.totalScore}. Stopping optimization.`,
+      );
       break;
     }
 
@@ -688,16 +892,19 @@ async function optimizeEngine(baseline: BenchmarkMetrics[]): Promise<void> {
     saveAnalyzerConfig(config);
     console.log('\nRe-running benchmarks after optimization...');
     const newResults = await runBenchmarks(`Iteration-${iteration}`);
-    
+
     // Check if we improved
-    const improvement = newResults.reduce((sum, r) => sum + r.totalScore, 0) - 
-                       baseline.reduce((sum, r) => sum + r.totalScore, 0);
-    
+    const improvement =
+      newResults.reduce((sum, r) => sum + r.totalScore, 0) -
+      baseline.reduce((sum, r) => sum + r.totalScore, 0);
+
     if (improvement <= 0 && iteration > 1) {
-      console.log(`\n⚠️  No improvement detected (${improvement > 0 ? '+' : ''}${improvement.toFixed(1)}). Stopping.`);
+      console.log(
+        `\n⚠️  No improvement detected (${improvement > 0 ? '+' : ''}${improvement.toFixed(1)}). Stopping.`,
+      );
       break;
     }
-    
+
     baseline = newResults;
   }
 
@@ -759,7 +966,9 @@ async function main() {
 
     case 'compare':
       if (args.length < 3) {
-        console.error('Usage: npm run test:benchmark compare <run1_timestamp> <run2_timestamp>');
+        console.error(
+          'Usage: npm run test:benchmark compare <run1_timestamp> <run2_timestamp>',
+        );
         process.exit(1);
       }
       compareRuns(args[1], args[2]);
@@ -785,13 +994,19 @@ function printHistory() {
     return;
   }
 
-  const history: BenchmarkHistory = JSON.parse(fs.readFileSync(BENCHMARK_HISTORY_FILE, 'utf8'));
+  const history: BenchmarkHistory = JSON.parse(
+    fs.readFileSync(BENCHMARK_HISTORY_FILE, 'utf8'),
+  );
   console.log(`\nBenchmark History (${history.runs.length} runs):\n`);
 
   history.runs.forEach((run, idx) => {
-    console.log(`${idx + 1}. ${run.label} - ${new Date(run.timestamp).toLocaleString()}`);
+    console.log(
+      `${idx + 1}. ${run.label} - ${new Date(run.timestamp).toLocaleString()}`,
+    );
     console.log(`   Avg Total Score: ${run.summary.avgTotalScore.toFixed(1)}`);
-    console.log(`   Songs Passed: ${run.summary.songsPassed}/${run.summary.songsTotal}`);
+    console.log(
+      `   Songs Passed: ${run.summary.songsPassed}/${run.summary.songsTotal}`,
+    );
     console.log('');
   });
 }
@@ -802,7 +1017,9 @@ function compareRuns(timestamp1: string, timestamp2: string) {
     return;
   }
 
-  const history: BenchmarkHistory = JSON.parse(fs.readFileSync(BENCHMARK_HISTORY_FILE, 'utf8'));
+  const history: BenchmarkHistory = JSON.parse(
+    fs.readFileSync(BENCHMARK_HISTORY_FILE, 'utf8'),
+  );
   const run1 = history.runs.find((r) => r.timestamp.includes(timestamp1));
   const run2 = history.runs.find((r) => r.timestamp.includes(timestamp2));
 
@@ -812,20 +1029,26 @@ function compareRuns(timestamp1: string, timestamp2: string) {
   }
 
   console.log(`\nComparing:`);
-  console.log(`  Run 1: ${run1.label} (${new Date(run1.timestamp).toLocaleString()})`);
-  console.log(`  Run 2: ${run2.label} (${new Date(run2.timestamp).toLocaleString()})\n`);
+  console.log(
+    `  Run 1: ${run1.label} (${new Date(run1.timestamp).toLocaleString()})`,
+  );
+  console.log(
+    `  Run 2: ${run2.label} (${new Date(run2.timestamp).toLocaleString()})\n`,
+  );
 
-  const comparison = run1.results.map((r1) => {
-    const r2 = run2.results.find((r) => r.songId === r1.songId);
-    if (!r2) return null;
+  const comparison = run1.results
+    .map((r1) => {
+      const r2 = run2.results.find((r) => r.songId === r1.songId);
+      if (!r2) return null;
 
-    return {
-      Song: r1.title,
-      'Total Score': `${r1.totalScore} → ${r2.totalScore} (${r2.totalScore - r1.totalScore > 0 ? '+' : ''}${r2.totalScore - r1.totalScore})`,
-      'Chord Ratio': `${(r1.chordRatio * 100).toFixed(1)}% → ${(r2.chordRatio * 100).toFixed(1)}%`,
-      'Segment Ratio': `${(r1.segmentRatio * 100).toFixed(1)}% → ${(r2.segmentRatio * 100).toFixed(1)}%`,
-    };
-  }).filter(Boolean);
+      return {
+        Song: r1.title,
+        'Total Score': `${r1.totalScore} → ${r2.totalScore} (${r2.totalScore - r1.totalScore > 0 ? '+' : ''}${r2.totalScore - r1.totalScore})`,
+        'Chord Ratio': `${(r1.chordRatio * 100).toFixed(1)}% → ${(r2.chordRatio * 100).toFixed(1)}%`,
+        'Segment Ratio': `${(r1.segmentRatio * 100).toFixed(1)}% → ${(r2.segmentRatio * 100).toFixed(1)}%`,
+      };
+    })
+    .filter(Boolean);
 
   console.table(comparison);
 }
@@ -836,14 +1059,18 @@ function printLatestRun() {
     return;
   }
 
-  const history: BenchmarkHistory = JSON.parse(fs.readFileSync(BENCHMARK_HISTORY_FILE, 'utf8'));
+  const history: BenchmarkHistory = JSON.parse(
+    fs.readFileSync(BENCHMARK_HISTORY_FILE, 'utf8'),
+  );
   if (history.runs.length === 0) {
     console.log('No benchmark runs found.');
     return;
   }
 
   const latest = history.runs[history.runs.length - 1];
-  console.log(`\nLatest Run: ${latest.label} (${new Date(latest.timestamp).toLocaleString()})\n`);
+  console.log(
+    `\nLatest Run: ${latest.label} (${new Date(latest.timestamp).toLocaleString()})\n`,
+  );
   printReport(latest.results, latest.label);
 }
 
@@ -851,4 +1078,3 @@ main().catch((error) => {
   console.error('Benchmark failed:', error);
   process.exit(1);
 });
-

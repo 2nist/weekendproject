@@ -30,11 +30,11 @@
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
     /* 🎵 Music Theory Theme (Cyberpunk/Dark Mode Default) */
-    --music-kick: 190 90% 50%;      /* Cyan */
-    --music-snare: 300 90% 50%;     /* Fuchsia */
-    --music-tonic: 220 80% 20%;     /* Deep Blue */
+    --music-kick: 190 90% 50%; /* Cyan */
+    --music-snare: 300 90% 50%; /* Fuchsia */
+    --music-tonic: 220 80% 20%; /* Deep Blue */
     --music-subdominant: 160 60% 20%; /* Deep Green */
-    --music-dominant: 0 70% 20%;    /* Deep Red */
+    --music-dominant: 0 70% 20%; /* Deep Red */
     --music-diminished: 270 50% 20%; /* Deep Purple */
   }
 
@@ -84,7 +84,7 @@
     --chart-5: 340 75% 55%;
     /* Music tones (Dark Mode defaults) */
     --music-kick: 190 90% 50%;
-    --music-snare: 300 90% 50%; 
+    --music-snare: 300 90% 50%;
     --music-tonic: 220 80% 20%;
     --music-subdominant: 160 60% 20%;
     --music-dominant: 0 70% 20%;
@@ -98,15 +98,26 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    font-feature-settings:
+      'rlig' 1,
+      'calt' 1;
   }
 }
 
 /* Subtle pulse for high-energy hits */
 @keyframes pulse-subtle {
-  0% { transform: translateY(0) scale(1); opacity: 1; }
-  50% { transform: translateY(-2px) scale(1.01); opacity: 0.95; }
-  100% { transform: translateY(0) scale(1); opacity: 1; }
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(-2px) scale(1.01);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
 }
 .animate-pulse-subtle {
   animation: pulse-subtle 1s ease-in-out infinite;

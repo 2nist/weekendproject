@@ -8,7 +8,11 @@ function spawnDownload(url, outdir = null) {
     const { spawnSync } = require('node:child_process');
     const check = spawnSync('ffmpeg', ['-version']);
     if (check.status !== 0) {
-      return reject(new Error('ffmpeg_not_found. Please install ffmpeg and ensure it is in PATH.'));
+      return reject(
+        new Error(
+          'ffmpeg_not_found. Please install ffmpeg and ensure it is in PATH.',
+        ),
+      );
     }
     const scriptPath = path.join(__dirname, '..', 'analysis', 'download.py');
     if (!fs.existsSync(scriptPath)) {
@@ -23,13 +27,13 @@ function spawnDownload(url, outdir = null) {
 
     python.stdout.on('data', (data) => {
       buffer += data.toString();
-      let idx;
-      while ((idx = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 1);
-        if (!line) continue;
+      // Try to extract a JSON object anywhere inside the buffered string
+      // This helps when yt-dlp emits progress lines that are mixed with the JSON output.
+      const jsonMatch = buffer.match(/\{[\s\S]*\}\s*$/);
+      if (jsonMatch && jsonMatch[0]) {
+        const jsonStr = jsonMatch[0].trim();
         try {
-          const msg = JSON.parse(line);
+          const msg = JSON.parse(jsonStr);
           if (msg.status === 'success' && msg.path) {
             return resolve(msg);
           }
@@ -37,10 +41,11 @@ function spawnDownload(url, outdir = null) {
             return reject(new Error(msg.message || 'Download failed'));
           }
         } catch (err) {
-          // Ignore non-JSON lines
-          console.debug('downloader: non-json stdout', err?.message || err);
+          console.debug('downloader: json parse error', err?.message || err);
         }
       }
+      // Trim buffer to a reasonable size to avoid memory growth
+      if (buffer.length > 1024 * 10) buffer = buffer.slice(-1024 * 5);
     });
 
     python.stderr.on('data', (d) => {
@@ -49,12 +54,18 @@ function spawnDownload(url, outdir = null) {
 
     python.on('close', (code) => {
       if (code !== 0) {
-        return reject(new Error(`Python downloader exited with code ${code}: ${errorBuf}`));
+        return reject(
+          new Error(`Python downloader exited with code ${code}: ${errorBuf}`),
+        );
       }
-      return reject(new Error('Python downloader exited without returning a path'));
+      return reject(
+        new Error('Python downloader exited without returning a path'),
+      );
     });
 
-    python.on('error', (err) => reject(new Error(`Python spawn failed: ${err.message}`)));
+    python.on('error', (err) =>
+      reject(new Error(`Python spawn failed: ${err.message}`)),
+    );
   });
 }
 

@@ -3,12 +3,15 @@ import Architect from './pages/ArchitectView';
 import ArchitectNew from './pages/Architect';
 import Connections from './pages/Connections';
 import Mapper from './pages/Mapper';
+import LibraryView from './views/LibraryView';
 import AnalysisJobManager from './components/AnalysisJobManager';
 import Toolbar from './components/Toolbar';
 import ThemeEditor from './components/settings/ThemeEditor';
+import SandboxView from './views/SandboxView';
 
 function App() {
   const [activeTab, setActiveTab] = React.useState('Architect');
+  const [sandboxContext, setSandboxContext] = React.useState(null);
   const [error, setError] = React.useState(null);
 
   React.useEffect(() => {
@@ -19,6 +22,33 @@ function App() {
     };
     window.addEventListener('error', errorHandler);
     return () => window.removeEventListener('error', errorHandler);
+  }, []);
+
+  // Listen for OPEN_SANDBOX events to navigate from other parts of the UI
+  React.useEffect(() => {
+    const onOpenSandbox = async (e) => {
+      const detail = e?.detail || {};
+      // If analysisId present, fetch analysis by id
+      if (detail.analysisId && !detail.fileHash) {
+        try {
+          const res = await window.ipc.invoke(
+            'ANALYSIS:GET_BY_ID',
+            detail.analysisId,
+          );
+          if (res?.success && res.analysis) {
+            setSandboxContext(res.analysis);
+            setActiveTab('Sandbox');
+            return;
+          }
+        } catch (err) {
+          console.error('Failed to fetch analysis for sandbox', err);
+        }
+      }
+      setSandboxContext(detail || null);
+      setActiveTab('Sandbox');
+    };
+    window.addEventListener('OPEN_SANDBOX', onOpenSandbox);
+    return () => window.removeEventListener('OPEN_SANDBOX', onOpenSandbox);
   }, []);
 
   if (error) {
@@ -35,7 +65,9 @@ function App() {
     <div className="h-screen flex flex-col font-sans antialiased">
       <header className="p-3 border-b border-border flex items-center justify-between">
         <div className="flex gap-2 items-center">
-          <strong className="font-semibold text-foreground">Interface Architect</strong>
+          <strong className="font-semibold text-foreground">
+            Interface Architect
+          </strong>
           <nav className="flex ml-3 gap-0">
             <button
               onClick={() => setActiveTab('Architect')}
@@ -87,6 +119,26 @@ function App() {
             >
               Settings
             </button>
+            <button
+              onClick={() => setActiveTab('Library')}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
+                activeTab === 'Library'
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Library
+            </button>
+            <button
+              onClick={() => setActiveTab('Sandbox')}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
+                activeTab === 'Sandbox'
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Sandbox
+            </button>
           </nav>
         </div>
       </header>
@@ -97,11 +149,13 @@ function App() {
         {activeTab === 'Mapper' && <Mapper />}
         {activeTab === 'Analysis' && <AnalysisJobManager />}
         {activeTab === 'Settings' && <ThemeEditor />}
+        {activeTab === 'Library' && <LibraryView />}
+        {activeTab === 'Sandbox' && <SandboxView data={sandboxContext || {}} />}
       </div>
 
       <footer className="border-t border-border p-2.5">
         <div className="max-w-5xl mx-auto flex justify-center">
-          <Toolbar />
+          <Toolbar openSandbox={() => setActiveTab('Sandbox')} />
         </div>
       </footer>
     </div>

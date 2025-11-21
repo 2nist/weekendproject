@@ -10,16 +10,53 @@ const osc = require('node-osc');
 const metadataLookup = require('./analysis/metadataLookup');
 const sessionManager = require('./analysis/sessionManager');
 const listener = require('./analysis/listener');
-const architect = require('./analysis/architect');
+const architect = require('./analysis/architect_clean');
 const theorist = require('./analysis/theorist');
 const fileProcessor = require('./analysis/fileProcessor');
 const progressTracker = require('./analysis/progressTracker');
 const genreProfiles = require('./analysis/genreProfiles');
 const structureGenerator = require('./analysis/structureGenerator');
+// Midi parser
+let midiParser = null;
+try {
+  // Prefer TS version in dev
+  try {
+    require('ts-node').register({ transpileOnly: true });
+  } catch (e) {}
+  const mpTS = require('./analysis/midiParser.ts');
+  midiParser = mpTS && mpTS.default ? mpTS.default : mpTS;
+} catch (err) {
+  const mpJS = require('./analysis/midiParser');
+  midiParser = mpJS && mpJS.default ? mpJS.default : mpJS;
+}
+// Downloader bridge
+const downloaderBridge = require('./bridges/downloader');
+// Library service: prefer TS in dev
+let libraryService = null;
+try {
+  try {
+    require('ts-node').register({ transpileOnly: true });
+  } catch (e) {}
+  const libTS = require('./services/library.ts');
+  libraryService = libTS && libTS.default ? libTS.default : libTS;
+} catch (err) {
+  const libJS = require('./services/library');
+  libraryService = libJS && libJS.default ? libJS.default : libJS;
+}
 
 const app = electron.app;
 const BrowserWindow = electron.BrowserWindow;
 const ipcMain = electron.ipcMain;
+
+// Safe IPC registration helper - removes any existing handler first.
+function registerIpcHandler(channel, handler) {
+  try {
+    ipcMain.removeHandler(channel);
+  } catch (e) {
+    // ignore
+  }
+  ipcMain.handle(channel, handler);
+}
 const session = electron.session;
 const dialog = electron.dialog;
 
@@ -43,9 +80,52 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
     },
+    // Set a dark background so the window isn't white if CSS fails
+    backgroundColor: '#0f172a',
   });
 
-  mainWindow.loadURL('http://localhost:5173');
+  if (app.isPackaged || process.env.NODE_ENV === 'production') {
+    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  } else {
+    const devUrl = 'http://localhost:5173';
+    // Robust: wait for Vite dev server to be ready to avoid ERR_CONNECTION_REFUSED
+    const http = require('http');
+    const maxRetries = 40;
+    const retryInterval = 250; // ms
+    let attempts = 0;
+
+    const tryLoad = () => {
+      attempts++;
+      const req = http.request(
+        devUrl,
+        { method: 'HEAD', timeout: 2000 },
+        (res) => {
+          if (res.statusCode >= 200 && res.statusCode < 400) {
+            mainWindow.loadURL(devUrl);
+            mainWindow.webContents.openDevTools();
+          } else if (attempts < maxRetries) {
+            setTimeout(tryLoad, retryInterval);
+          } else {
+            // Last resort: still try to load
+            mainWindow.loadURL(devUrl);
+            mainWindow.webContents.openDevTools();
+          }
+        },
+      );
+      req.on('error', () => {
+        if (attempts < maxRetries) setTimeout(tryLoad, retryInterval);
+        else mainWindow.loadURL(devUrl);
+      });
+      req.on('timeout', () => {
+        req.destroy();
+        if (attempts < maxRetries) setTimeout(tryLoad, retryInterval);
+        else mainWindow.loadURL(devUrl);
+      });
+      req.end();
+    };
+
+    tryLoad();
+  }
 }
 
 function broadcastStatus() {
@@ -70,6 +150,9 @@ app.whenReady().then(async () => {
     reaper: new osc.Client('127.0.0.1', settings.reaper_port),
     ableton: new osc.Client('127.0.0.1', settings.ableton_port),
   };
+
+  const isDev =
+    process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
 
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
@@ -103,13 +186,120 @@ app.whenReady().then(async () => {
   });
 });
 
+// Downloader Handler: spawn Python downloader and return result JSON
+registerIpcHandler('DOWNLOADER:DOWNLOAD', async (event, url) => {
+  try {
+    console.log('DOWNLOADER: Starting download for', url);
+    const res = await downloaderBridge.spawnDownload(url);
+    console.log('DOWNLOADER: Success', res);
+    return { success: true, path: res.path, title: res.title };
+  } catch (err) {
+    console.error('DOWNLOADER: Failed', err?.message || err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+// Library handlers
+registerIpcHandler('LIBRARY:CREATE_PROJECT', async (event, payload) => {
+  try {
+    const userDataPath = app.getPath('userData');
+    const result = libraryService.createProject(userDataPath, payload);
+    return result;
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+registerIpcHandler('LIBRARY:GET_PROJECTS', async () => {
+  try {
+    const projects = libraryService.getAllProjects();
+    return { success: true, projects };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+registerIpcHandler(
+  'LIBRARY:ATTACH_MIDI',
+  async (event, { projectId, midiPath }) => {
+    try {
+      const userDataPath = app.getPath('userData');
+      // copy midi file to library and attach
+      const uuidProject = libraryService
+        .getAllProjects()
+        .find((p) => p.id === projectId)?.uuid;
+      const fs = require('fs');
+      const path = require('path');
+      if (!uuidProject) return { success: false, error: 'Project not found' };
+      const destDir = path.join(app.getPath('userData'), 'library', 'midi');
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      const destFile = path.join(
+        destDir,
+        `${uuidProject}-${path.basename(midiPath)}`,
+      );
+      fs.copyFileSync(midiPath, destFile);
+      const attachRes = libraryService.attachMidi(projectId, destFile);
+      if (!attachRes || !attachRes.success) {
+        return { success: false, error: attachRes?.error || 'attach failed' };
+      }
+      return { success: true, midi_path: destFile };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+);
+
+// Parse MIDI and attach/save analysis for a project
+registerIpcHandler(
+  'LIBRARY:PARSE_MIDI',
+  async (event, { projectId, midiPath }) => {
+    try {
+      if (!projectId || !midiPath) throw new Error('Missing parameters');
+      if (!libraryService || !libraryService.parseMidiAndSaveForProject) {
+        // Fallback: use midiParser directly and save
+        const res = midiParser.parseMidiToLinearAnalysis
+          ? midiParser.parseMidiToLinearAnalysis(midiPath)
+          : await midiParser.parseMidiFileToLinear(midiPath);
+        if (!res || !res.linear_analysis)
+          throw new Error('MIDI parsing failed');
+        const metadata = res.linear_analysis.metadata || {};
+        const fileHash = `midi-${Date.now()}`;
+        const analysisId = db.saveAnalysis({
+          file_path: midiPath,
+          file_hash: fileHash,
+          metadata,
+          linear_analysis: res.linear_analysis,
+          structural_map: { sections: [] },
+          arrangement_flow: {},
+          harmonic_context: {},
+          polyrhythmic_layers: [],
+        });
+        const database = db.getDb();
+        database &&
+          database.run &&
+          database.run('UPDATE Projects SET analysis_id = ? WHERE id = ?', [
+            analysisId,
+            projectId,
+          ]);
+        return { success: true, analysisId, fileHash };
+      }
+      const p = await libraryService.parseMidiAndSaveForProject(
+        projectId,
+        midiPath,
+      );
+      return p;
+    } catch (err) {
+      return { success: false, error: err.message || String(err) };
+    }
+  },
+);
 app.on('window-all-closed', function () {
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
-ipcMain.handle('DB:LOAD_ARRANGEMENT', async (event, arg) => {
+registerIpcHandler('DB:LOAD_ARRANGEMENT', async (event, arg) => {
   const database = db.getDb();
   const stmt = database.prepare('SELECT * FROM Arrangement');
   const arrangements = stmt.all();
@@ -117,16 +307,22 @@ ipcMain.handle('DB:LOAD_ARRANGEMENT', async (event, arg) => {
   return arrangements;
 });
 
-ipcMain.handle('TRACK:RESOLVE_INDEX', async (event, trackName) => {
+registerIpcHandler('TRACK:RESOLVE_INDEX', async (event, trackName) => {
   return trackResolver.getTrackIndex(trackName);
 });
 
-ipcMain.handle('OSC:SEND_TRANSPORT', async (event, command) => {
+registerIpcHandler('OSC:SEND_TRANSPORT', async (event, command) => {
   const reaperMessage = oscBuilder.sendReaperTransport(command);
   const abletonMessage = oscBuilder.sendAbletonTransport(command);
 
-  oscClients.reaper.send(reaperMessage.address, ...reaperMessage.args.map(a => a.value));
-  oscClients.ableton.send(abletonMessage.address, ...abletonMessage.args.map(a => a.value));
+  oscClients.reaper.send(
+    reaperMessage.address,
+    ...reaperMessage.args.map((a) => a.value),
+  );
+  oscClients.ableton.send(
+    abletonMessage.address,
+    ...abletonMessage.args.map((a) => a.value),
+  );
 });
 
 ipcMain.on('NETWORK:SEND_MACRO', (event, { macro, payload }) => {
@@ -136,8 +332,14 @@ ipcMain.on('NETWORK:SEND_MACRO', (event, { macro, payload }) => {
     const reaperMessage = oscBuilder.sendReaperTransport(command);
     const abletonMessage = oscBuilder.sendAbletonTransport(command);
 
-    oscClients.reaper.send(reaperMessage.address, ...reaperMessage.args.map(a => a.value));
-    oscClients.ableton.send(abletonMessage.address, ...abletonMessage.args.map(a => a.value));
+    oscClients.reaper.send(
+      reaperMessage.address,
+      ...reaperMessage.args.map((a) => a.value),
+    );
+    oscClients.ableton.send(
+      abletonMessage.address,
+      ...abletonMessage.args.map((a) => a.value),
+    );
     broadcastStatus();
   } else {
     if (!payload || !payload.macroId) {
@@ -155,7 +357,11 @@ ipcMain.on('UI:REQUEST_STATUS', (event) => {
 ipcMain.on('UI:REQUEST_INITIAL', (event) => {
   // Send current blocks if any exist
   if (currentBlocks.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
-    console.log('UI:REQUEST_INITIAL: Sending', currentBlocks.length, 'existing blocks');
+    console.log(
+      'UI:REQUEST_INITIAL: Sending',
+      currentBlocks.length,
+      'existing blocks',
+    );
     mainWindow.webContents.send('UI:BLOCKS_UPDATE', currentBlocks);
   } else {
     console.log('UI:REQUEST_INITIAL: No blocks to send');
@@ -164,16 +370,23 @@ ipcMain.on('UI:REQUEST_INITIAL', (event) => {
 });
 
 // Dialog IPC Handlers
-ipcMain.handle('DIALOG:SHOW_OPEN', async (event, options = {}) => {
+registerIpcHandler('DIALOG:SHOW_OPEN', async (event, options = {}) => {
   try {
     if (!mainWindow || mainWindow.isDestroyed()) {
-      return { canceled: true, filePaths: [], error: 'Main window not available' };
+      return {
+        canceled: true,
+        filePaths: [],
+        error: 'Main window not available',
+      };
     }
 
     const result = await dialog.showOpenDialog(mainWindow, {
       title: options.title || 'Select Audio File',
       filters: options.filters || [
-        { name: 'Audio Files', extensions: ['wav', 'mp3', 'flac', 'm4a', 'ogg', 'aac'] },
+        {
+          name: 'Audio Files',
+          extensions: ['wav', 'mp3', 'flac', 'm4a', 'ogg', 'aac'],
+        },
         { name: 'All Files', extensions: ['*'] },
       ],
       properties: ['openFile'],
@@ -191,180 +404,123 @@ ipcMain.handle('DIALOG:SHOW_OPEN', async (event, options = {}) => {
   }
 });
 
-// Analysis IPC Handlers
-
-ipcMain.handle('ANALYSIS:START', async (event, { filePath, userHints = {} }) => {
+// Helper: start full analysis (used by ANALYSIS:START and by LIBRARY:RE_ANALYZE)
+async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
   const startTime = Date.now();
-  console.log('=== ANALYSIS START ===');
+  console.log('=== startFullAnalysis START ===');
   console.log('File path:', filePath);
-  console.log('User hints:', userHints);
-  
   try {
-    // Validate input
-    if (!filePath || typeof filePath !== 'string') {
-      throw new Error('Invalid file path provided');
-    }
-
-    // Validate file exists
+    // Validate and run the same code path as ANALYSIS:START
     const fs = require('fs');
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`File does not exist: ${filePath}`);
-    }
-    
-    const stats = fs.statSync(filePath);
-    console.log('File size:', stats.size, 'bytes');
+    if (!filePath || typeof filePath !== 'string')
+      throw new Error('Invalid file path');
+    if (!fs.existsSync(filePath))
+      throw new Error('File does not exist: ' + filePath);
 
-    // Validate file
-    const validation = fileProcessor.validateFile(filePath);
-    if (!validation.valid) {
-      throw new Error(validation.error || 'File validation failed');
-    }
+    // NOTE: Required at top of file for early failure detection
 
-    if (!fileProcessor.isSupportedFormat(filePath)) {
-      throw new Error('Unsupported audio format');
-    }
-
-    // Step 0: Metadata lookup
-    console.log('Step 0: Metadata lookup...');
     const metadata = metadataLookup.gatherMetadata(filePath, userHints);
     const fileInfo = fileProcessor.getFileInfo(filePath);
     const fileHash = fileInfo.hash;
-    console.log('File hash:', fileHash);
 
-    // Create session
     const session = sessionManager.createSession(filePath, fileHash, metadata);
     const tracker = new progressTracker.ProgressTracker(session, mainWindow);
 
-    console.log('Analysis session created, fileHash:', fileHash);
     session.setState('pass1');
     tracker.update('step0', 100);
-    tracker.broadcast(); // Force immediate broadcast
-    console.log('Initial progress broadcast sent');
-    
-    // Small delay to ensure UI receives the initial update
-    await new Promise(resolve => setTimeout(resolve, 50));
+    tracker.broadcast();
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    // Pass 1: The Listener
-    console.log('Starting Pass 1: The Listener');
     tracker.update('pass1', 0);
-    tracker.broadcast(); // Force broadcast
-    
-            let result;
-            try {
-              result = await listener.analyzeAudio(filePath, (progress) => {
-        console.log('Pass 1 progress:', progress);
+    tracker.broadcast();
+    let result = await listener.analyzeAudio(
+      filePath,
+      (progress) => {
         tracker.update('pass1', progress);
-              }, metadata);
-    } catch (error) {
-      console.error('Pass 1 error:', error);
-      throw error;
-    }
-    
-    if (!result || !result.linear_analysis) {
+        tracker.broadcast();
+      },
+      metadata,
+    );
+    if (!result || !result.linear_analysis)
       throw new Error('Pass 1 returned invalid result');
-    }
-    
-    console.log('Pass 1 complete:', {
-      events: result.linear_analysis.events?.length || 0,
-      beats: result.linear_analysis.beat_grid?.beat_timestamps?.length || 0,
-      tempo: result.linear_analysis.beat_grid?.tempo_bpm
-    });
-    
-    const { linear_analysis } = result;
+
+    const linear_analysis = result.linear_analysis;
     session.setResult('pass1', linear_analysis);
-    tracker.update('pass1', 100);
+    // color intentionally omitted; UI controls theme mapping
     tracker.broadcast();
 
-    // Pass 2: The Architect
-    console.log('Starting Pass 2: The Architect');
+    // Pass 2: Architect
     session.setState('pass2');
     tracker.update('pass2', 0);
     tracker.broadcast();
-    
-    let structural_map;
-    try {
-      structural_map = await architect.analyzeStructure(linear_analysis, (progress) => {
-        console.log('Pass 2 progress:', progress);
-        tracker.update('pass2', progress);
-      });
-      
-      if (!structural_map || !structural_map.sections) {
-        throw new Error('Pass 2 returned invalid result: missing sections');
-      }
-      
-      console.log('Pass 2 complete:', {
-        sections: structural_map.sections?.length || 0,
-        boundaries: structural_map.boundaries?.length || 0
-      });
-      
-      session.setResult('pass2', structural_map);
-      tracker.update('pass2', 100);
-      tracker.broadcast();
-    } catch (error) {
-      console.error('Pass 2 error:', error);
-      console.error('Pass 2 error stack:', error.stack);
-      throw error;
-    }
+    const architectOptions = {
+      forceOverSeg: true,
+      noveltyKernel: 9,
+      mergeChromaThreshold: 0.85,
+      exactChromaThreshold: 0.95,
+      exactMfccThreshold: 0.7,
+      progressionSimilarityThreshold: 0.8,
+      progressionSimilarityMode: 'normalized',
+      minSectionsStop: 8,
+      minSectionDurationSec: 8,
+      // Downsample factor used by architect to avoid OOM on long songs
+      downsampleFactor: 4,
+      // Enable microMergeBar and aggressive progression by default? Not needed yet
+    };
+    console.log('Applying Golden Architecture Config:', architectOptions);
+    const structural_map = await architect.analyzeStructure(
+      linear_analysis,
+      (p) => {
+        tracker.update('pass2', p);
+        tracker.broadcast();
+      },
+      architectOptions,
+    );
+    if (!structural_map || !structural_map.sections)
+      throw new Error('Pass 2 returned invalid result');
+    session.setResult('pass2', structural_map);
+    tracker.update('pass2', 100);
+    tracker.broadcast();
 
-    // Pass 3: The Theorist
-    console.log('Starting Pass 3: The Theorist');
+    // Pass 3: Theorist
     session.setState('pass3');
     tracker.update('pass3', 0);
     tracker.broadcast();
-    
-    let corrected_structural_map;
-    try {
-      corrected_structural_map = await theorist.correctStructuralMap(
-        structural_map,
-        linear_analysis,
-        metadata,
-        (progress) => {
-          console.log('Pass 3 progress:', progress);
-          tracker.update('pass3', progress);
-        },
-      );
-      
-      if (!corrected_structural_map || !corrected_structural_map.sections) {
-        throw new Error('Pass 3 returned invalid result: missing sections');
-      }
-      
-      console.log('Pass 3 complete:', {
-        sections: corrected_structural_map.sections?.length || 0
-      });
-      
-      session.setResult('pass3', corrected_structural_map);
-      tracker.update('pass3', 100);
-      tracker.broadcast();
-    } catch (error) {
-      console.error('Pass 3 error:', error);
-      console.error('Pass 3 error stack:', error.stack);
-      throw error;
-    }
+    const corrected_structural_map = await theorist.correctStructuralMap(
+      structural_map,
+      linear_analysis,
+      metadata,
+      (p) => {
+        tracker.update('pass3', p);
+        tracker.broadcast();
+      },
+    );
+    if (!corrected_structural_map || !corrected_structural_map.sections)
+      throw new Error('Pass 3 returned invalid result');
+    session.setResult('pass3', corrected_structural_map);
+    tracker.update('pass3', 100);
+    tracker.broadcast();
 
-    // Build arrangement flow
-    console.log('Building arrangement flow...');
+    // Build arrangement_flow and harmonic_context
     const arrangement_flow = {
       form: determineForm(corrected_structural_map.sections),
-      timeline: corrected_structural_map.sections.map((section, idx) => ({
+      timeline: corrected_structural_map.sections.map((s, idx) => ({
         position: idx + 1,
-        section_reference: section.section_id,
-        start_time: section.time_range?.start_time || 0,
-        end_time: section.time_range?.end_time || 0,
+        section_reference: s.section_id,
+        start_time: s.time_range?.start_time || 0,
+        end_time: s.time_range?.end_time || 0,
         variations: [],
       })),
       transitions: [],
     };
-    console.log('Arrangement flow:', {
-      form: arrangement_flow.form,
-      timelineItems: arrangement_flow.timeline.length
-    });
-
-    // Build harmonic context
-    console.log('Building harmonic context...');
     const harmonic_context = {
       global_key: {
-        primary_key: linear_analysis.metadata?.detected_key || metadata.key_hint || 'C',
-        mode: linear_analysis.metadata?.detected_mode || metadata.mode_hint || 'ionian',
+        primary_key:
+          linear_analysis.metadata?.detected_key || metadata.key_hint || 'C',
+        mode:
+          linear_analysis.metadata?.detected_mode ||
+          metadata.mode_hint ||
+          'ionian',
         confidence: 0.8,
       },
       modulations: [],
@@ -372,35 +528,14 @@ ipcMain.handle('ANALYSIS:START', async (event, { filePath, userHints = {} }) => 
       genre_profile: {
         detected_genre: metadata.genre_hint || 'pop',
         confidence: 0.7,
-        genre_constraints: genreProfiles.getGenreProfile(metadata.genre_hint || 'pop'),
+        genre_constraints: genreProfiles.getGenreProfile(
+          metadata.genre_hint || 'pop',
+        ),
       },
-      functional_summary: {
-        predominant_usage: 0.3,
-        dominant_usage: 0.25,
-        tonic_usage: 0.4,
-        chromatic_density: 0.05,
-      },
+      functional_summary: {},
     };
 
-    // Validate data before saving
-    console.log('Validating analysis data before save...');
-    console.log('Linear analysis:', {
-      hasEvents: !!linear_analysis.events,
-      eventCount: linear_analysis.events?.length || 0,
-      hasBeatGrid: !!linear_analysis.beat_grid,
-      hasMetadata: !!linear_analysis.metadata,
-    });
-    console.log('Structural map:', {
-      hasSections: !!corrected_structural_map.sections,
-      sectionCount: corrected_structural_map.sections?.length || 0,
-    });
-    
-    if (!linear_analysis || !corrected_structural_map || !corrected_structural_map.sections) {
-      throw new Error('Invalid analysis data: missing required fields');
-    }
-
-    // Save to database
-    console.log('Saving analysis to database...');
+    // Save analysis
     const analysisId = db.saveAnalysis({
       file_path: filePath,
       file_hash: fileHash,
@@ -411,58 +546,38 @@ ipcMain.handle('ANALYSIS:START', async (event, { filePath, userHints = {} }) => 
       harmonic_context,
       polyrhythmic_layers: [],
     });
-    console.log('Analysis saved, ID:', analysisId);
-    
-    // Verify it was saved
-    const verifyAnalysis = db.getAnalysis(fileHash);
-    if (verifyAnalysis) {
-      console.log('✓ Analysis verified in database:', {
-        hasLinearAnalysis: !!verifyAnalysis.linear_analysis,
-        hasStructuralMap: !!verifyAnalysis.structural_map,
-        sectionCount: verifyAnalysis.structural_map?.sections?.length || 0,
-      });
-    } else {
-      console.error('✗ Analysis NOT found in database after save!');
+    if (projectId && analysisId) {
+      const database = db.getDb();
+      database &&
+        database.run &&
+        database.run('UPDATE Projects SET analysis_id = ? WHERE id = ?', [
+          analysisId,
+          projectId,
+        ]);
     }
 
     tracker.complete();
-    
     const endTime = Date.now();
-    const duration = ((endTime - startTime) / 1000).toFixed(2);
-    console.log(`=== ANALYSIS COMPLETE (${duration}s) ===`);
-
-    return {
-      success: true,
-      analysisId,
-      fileHash,
-    };
-  } catch (error) {
-    const endTime = Date.now();
-    const duration = ((endTime - startTime) / 1000).toFixed(2);
-    console.error(`=== ANALYSIS FAILED (${duration}s) ===`);
-    console.error('Error:', error);
-    console.error('Stack:', error.stack);
-    
-    // Make sure error is broadcast
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      try {
-        mainWindow.webContents.send('ANALYSIS:PROGRESS', {
-          state: 'failed',
-          error: error.message,
-        });
-      } catch (e) {
-        // Ignore
-      }
-    }
-    
-    return {
-      success: false,
-      error: error.message,
-    };
+    console.log(
+      `=== startFullAnalysis COMPLETE (${((endTime - startTime) / 1000).toFixed(2)}s) ===`,
+    );
+    return { success: true, analysisId, fileHash };
+  } catch (err) {
+    console.error('startFullAnalysis error:', err);
+    return { success: false, error: err.message || String(err) };
   }
-});
+}
 
-ipcMain.handle('ANALYSIS:GET_STATUS', async (event, fileHash) => {
+// Analysis IPC Handlers
+
+registerIpcHandler(
+  'ANALYSIS:START',
+  async (event, { filePath, userHints = {} }) => {
+    return await startFullAnalysis(filePath, userHints, null);
+  },
+);
+
+registerIpcHandler('ANALYSIS:GET_STATUS', async (event, fileHash) => {
   const session = sessionManager.getSession(fileHash);
   if (session) {
     return session.toJSON();
@@ -470,10 +585,10 @@ ipcMain.handle('ANALYSIS:GET_STATUS', async (event, fileHash) => {
   return null;
 });
 
-ipcMain.handle('ANALYSIS:GET_RESULT', async (event, fileHash) => {
+registerIpcHandler('ANALYSIS:GET_RESULT', async (event, fileHash) => {
   console.log('IPC: ANALYSIS:GET_RESULT called for fileHash:', fileHash);
   const analysis = db.getAnalysis(fileHash);
-  
+
   if (analysis) {
     console.log('IPC: Returning analysis with:', {
       id: analysis.id,
@@ -485,16 +600,141 @@ ipcMain.handle('ANALYSIS:GET_RESULT', async (event, fileHash) => {
   } else {
     console.warn('IPC: No analysis found for fileHash:', fileHash);
   }
-  
+
   return analysis;
 });
 
+registerIpcHandler('ANALYSIS:PARSE_MIDI', async (event, payload) => {
+  try {
+    console.warn(
+      'DEPRECATED: ANALYSIS:PARSE_MIDI called. Use LIBRARY:PARSE_MIDI.',
+    );
+    // Legacy call used to accept a midiPath string. Now we require an object with projectId and midiPath.
+    if (!payload) throw new Error('No payload provided');
+    // If payload is a string (old usage), reject to prevent orphaned analyses.
+    if (typeof payload === 'string') {
+      return {
+        success: false,
+        error:
+          'Legacy ANALYSIS:PARSE_MIDI usage is deprecated. Use LIBRARY:PARSE_MIDI({ projectId, midiPath }).',
+      };
+    }
+    const { projectId, midiPath } = payload;
+    if (!projectId || !midiPath) {
+      return {
+        success: false,
+        error:
+          'ANALYSIS:PARSE_MIDI requires { projectId, midiPath }. Use LIBRARY:PARSE_MIDI instead.',
+      };
+    }
+
+    // Forward to library service if available
+    if (libraryService && libraryService.parseMidiAndSaveForProject) {
+      return libraryService.parseMidiAndSaveForProject(projectId, midiPath);
+    }
+
+    // Fallback: parse the MIDI and save analysis, then attach to project
+    let res;
+    if (midiParser.parseMidiFileToLinear) {
+      res = await midiParser.parseMidiFileToLinear(midiPath);
+    } else if (midiParser.parseMidiToLinearAnalysis) {
+      res = midiParser.parseMidiToLinearAnalysis(midiPath);
+    } else {
+      throw new Error('No midi parser available');
+    }
+    if (!res || !res.linear_analysis) throw new Error('MIDI parsing failed');
+    const metadata = res.linear_analysis.metadata || {};
+    const fileHash = `midi-${Date.now()}`;
+    const analysisId = db.saveAnalysis({
+      file_path: midiPath,
+      file_hash: fileHash,
+      metadata,
+      linear_analysis: res.linear_analysis,
+      structural_map: { sections: [] },
+      arrangement_flow: {},
+      harmonic_context: {},
+      polyrhythmic_layers: [],
+    });
+    const database = db.getDb();
+    database &&
+      database.run &&
+      database.run('UPDATE Projects SET analysis_id = ? WHERE id = ?', [
+        analysisId,
+        projectId,
+      ]);
+    return { success: true, analysisId, fileHash };
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+// Fast re-calculation of chord events for an existing analysis (no Python)
+registerIpcHandler(
+  'ANALYSIS:RECALC_CHORDS',
+  async (event, { fileHash, globalKey, commit = false }) => {
+    try {
+      if (!fileHash) throw new Error('fileHash required');
+      const analysis = db.getAnalysis(fileHash);
+      if (!analysis || !analysis.linear_analysis)
+        throw new Error('Analysis not found');
+      // Try to invoke listener's recalcChords if available
+      if (listener && listener.recalcChords) {
+        // Add globalKey to metadata so chord analyzer can pick it up
+        const cloned = JSON.parse(JSON.stringify(analysis.linear_analysis));
+        if (!cloned.metadata) cloned.metadata = {};
+        if (globalKey) {
+          // Override the detected_key so TS analyzer will use it
+          cloned.metadata.detected_key = globalKey;
+          cloned.metadata.detected_mode =
+            cloned.metadata.detected_mode || 'major';
+          cloned.metadata.user_override_key = globalKey;
+        }
+        const res = listener.recalcChords(cloned, { globalKey });
+        if (!res || !res.success)
+          throw new Error(res?.error || 'recalc failed');
+        if (commit) {
+          // Persist changes to DB by updating the analysis linear_analysis
+          analysis.linear_analysis.events = res.events;
+          // Update the harmonic_context if globalKey overridden
+          if (globalKey) {
+            analysis.harmonic_context = analysis.harmonic_context || {};
+            analysis.harmonic_context.global_key =
+              analysis.harmonic_context.global_key || {};
+            analysis.harmonic_context.global_key.primary_key = globalKey;
+            analysis.harmonic_context.global_key.confidence =
+              analysis.harmonic_context.global_key.confidence || 0.95;
+          }
+          // call DB update to modify the existing analysis row
+          const success = db.updateAnalysisById(analysis.id, analysis);
+          if (!success) throw new Error('Failed to commit analysis update');
+        }
+        return { success: true, events: res.events };
+      }
+      // Fallback: no listener helper exposed
+      throw new Error('Listener recalc not available');
+    } catch (err) {
+      return { success: false, error: err.message || String(err) };
+    }
+  },
+);
+
+registerIpcHandler('ANALYSIS:GET_BY_ID', async (event, analysisId) => {
+  try {
+    if (!analysisId) throw new Error('analysisId required');
+    const res = db.getAnalysisById(analysisId);
+    if (!res) return { success: false, error: 'Not found' };
+    return { success: true, analysis: res };
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
 // Generate structure from constraints (Sandbox Mode)
-ipcMain.handle('SANDBOX:GENERATE', async (event, constraints) => {
+registerIpcHandler('SANDBOX:GENERATE', async (event, constraints) => {
   try {
     console.log('SANDBOX: Generating structure with constraints:', constraints);
     const structuralMap = structureGenerator.generateStructure(constraints);
-    
+
     // Convert to blocks format
     const blocks = structuralMap.sections.map((section, index) => {
       const duration = section.time_range
@@ -508,7 +748,6 @@ ipcMain.handle('SANDBOX:GENERATE', async (event, constraints) => {
         label: section.section_label || 'Section',
         length: bars,
         bars: bars,
-        color: getSectionColor(section.section_label),
         section_label: section.section_label,
         section_variant: section.section_variant,
         harmonic_dna: section.harmonic_dna || {},
@@ -519,10 +758,10 @@ ipcMain.handle('SANDBOX:GENERATE', async (event, constraints) => {
     });
 
     console.log('SANDBOX: Generated', blocks.length, 'sections');
-    
+
     // Store blocks for persistence
     currentBlocks = blocks;
-    
+
     // Send blocks to UI
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('UI:BLOCKS_UPDATE', blocks);
@@ -535,10 +774,38 @@ ipcMain.handle('SANDBOX:GENERATE', async (event, constraints) => {
   }
 });
 
-ipcMain.handle('ARCHITECT:UPDATE_BLOCKS', async (event, blocks = []) => {
+registerIpcHandler(
+  'LIBRARY:RE_ANALYZE',
+  async (event, { projectId, force = false }) => {
+    try {
+      if (!projectId) throw new Error('Missing projectId');
+      const project = db.getProjectById(projectId);
+      if (!project) throw new Error('Project not found');
+      if (!project.audio_path)
+        throw new Error('Project has no audio path to re-analyze');
+      // If there's an existing analysis, delete it unless force=false
+      if (project.analysis_id) {
+        // delete
+        db.deleteAnalysisById(project.analysis_id);
+        db.updateProjectAnalysisId(projectId, null);
+      }
+
+      // Start a fresh full analysis and attach it to the project
+      const res = await startFullAnalysis(project.audio_path, {}, projectId);
+      return res;
+    } catch (err) {
+      return { success: false, error: err.message || String(err) };
+    }
+  },
+);
+registerIpcHandler('ARCHITECT:UPDATE_BLOCKS', async (event, blocks = []) => {
   try {
     currentBlocks = Array.isArray(blocks) ? blocks : [];
-    console.log('ARCHITECT:UPDATE_BLOCKS received', currentBlocks.length, 'blocks');
+    console.log(
+      'ARCHITECT:UPDATE_BLOCKS received',
+      currentBlocks.length,
+      'blocks',
+    );
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('UI:BLOCKS_UPDATE', currentBlocks);
     }
@@ -549,30 +816,21 @@ ipcMain.handle('ARCHITECT:UPDATE_BLOCKS', async (event, blocks = []) => {
   }
 });
 
-// Helper function to get section color
-function getSectionColor(sectionLabel) {
-  const colors = {
-    intro: '#3b82f6',
-    verse: '#10b981',
-    chorus: '#f59e0b',
-    bridge: '#ef4444',
-    outro: '#8b5cf6',
-    default: '#6b7280',
-  };
-  return colors[sectionLabel?.toLowerCase()] || colors.default;
-}
-
 // Convert analysis results to blocks format for Architect view
-ipcMain.handle('ANALYSIS:LOAD_TO_ARCHITECT', async (event, fileHash) => {
+registerIpcHandler('ANALYSIS:LOAD_TO_ARCHITECT', async (event, fileHash) => {
   try {
     const analysis = db.getAnalysis(fileHash);
-    if (!analysis || !analysis.structural_map || !analysis.structural_map.sections) {
+    if (
+      !analysis ||
+      !analysis.structural_map ||
+      !analysis.structural_map.sections
+    ) {
       return { success: false, error: 'Analysis not found or invalid' };
     }
 
     console.log('Converting analysis sections to blocks...');
     console.log('Sections found:', analysis.structural_map.sections.length);
-    
+
     // Convert sections to blocks format
     const blocks = analysis.structural_map.sections.map((section, index) => {
       const duration = section.time_range
@@ -586,7 +844,7 @@ ipcMain.handle('ANALYSIS:LOAD_TO_ARCHITECT', async (event, fileHash) => {
         label: section.section_label || 'Section',
         length: bars,
         bars: bars,
-        color: getSectionColor(section.section_label),
+        // color intentionally omitted; UI controls theme mapping
         section_label: section.section_label,
         section_variant: section.section_variant,
         harmonic_dna: section.harmonic_dna || {},
@@ -594,23 +852,29 @@ ipcMain.handle('ANALYSIS:LOAD_TO_ARCHITECT', async (event, fileHash) => {
         time_range: section.time_range,
         probability_score: section.probability_score || 0.5,
       };
-      
-      console.log(`Block ${index}:`, block.id, block.label, block.length, 'bars');
+
+      console.log(
+        `Block ${index}:`,
+        block.id,
+        block.label,
+        block.length,
+        'bars',
+      );
       return block;
     });
 
     console.log(`Sending ${blocks.length} blocks to UI...`);
-    
+
     // Store blocks for persistence
     currentBlocks = blocks;
     console.log('Blocks stored in memory:', currentBlocks.length);
-    
+
     // Send blocks to UI
     if (mainWindow && !mainWindow.isDestroyed()) {
       try {
         mainWindow.webContents.send('UI:BLOCKS_UPDATE', blocks);
         console.log('Blocks sent successfully via UI:BLOCKS_UPDATE');
-        
+
         // Also send a second time after a small delay to ensure it's received
         setTimeout(() => {
           if (mainWindow && !mainWindow.isDestroyed()) {
@@ -632,46 +896,47 @@ ipcMain.handle('ANALYSIS:LOAD_TO_ARCHITECT', async (event, fileHash) => {
   }
 });
 
-function getSectionColor(label) {
-  const colors = {
-    intro: 'bg-purple-400',
-    verse: 'bg-blue-400',
-    chorus: 'bg-green-400',
-    bridge: 'bg-yellow-400',
-    outro: 'bg-gray-400',
-  };
-  return colors[label?.toLowerCase()] || 'bg-blue-400';
-}
+// NOTE: Color & styling mapping is handled on the frontend.
+// Backend only emits `section_label` and related data.
 
-ipcMain.handle('ANALYSIS:GET_SECTION', async (event, { analysisId, sectionId }) => {
-  const sections = db.getAnalysisSections(analysisId);
-  return sections.find((s) => s.section_id === sectionId);
-});
+registerIpcHandler(
+  'ANALYSIS:GET_SECTION',
+  async (event, { analysisId, sectionId }) => {
+    const sections = db.getAnalysisSections(analysisId);
+    return sections.find((s) => s.section_id === sectionId);
+  },
+);
 
-ipcMain.handle('THEORY:GET_GENRE_PROFILE', async (event, genreName) => {
+registerIpcHandler('THEORY:GET_GENRE_PROFILE', async (event, genreName) => {
   return genreProfiles.getGenreProfile(genreName);
 });
 
-ipcMain.handle('THEORY:VALIDATE_PROGRESSION', async (event, { chords, key, genre }) => {
-  // Validate chord sequence against theory rules
-  const genreProfile = genreProfiles.getGenreProfile(genre);
-  const keyContext = { primary_key: key, mode: 'ionian' };
+registerIpcHandler(
+  'THEORY:VALIDATE_PROGRESSION',
+  async (event, { chords, key, genre }) => {
+    // Validate chord sequence against theory rules
+    const genreProfile = genreProfiles.getGenreProfile(genre);
+    const keyContext = { primary_key: key, mode: 'ionian' };
 
-  // Simplified validation - would use full theory engine
-  return {
-    valid: true,
-    suggestions: [],
-  };
-});
+    // Simplified validation - would use full theory engine
+    return {
+      valid: true,
+      suggestions: [],
+    };
+  },
+);
 
-ipcMain.handle('ANALYSIS:SET_METADATA', async (event, { fileHash, metadata }) => {
-  const session = sessionManager.getSession(fileHash);
-  if (session) {
-    session.metadata = { ...session.metadata, ...metadata };
-    return { success: true };
-  }
-  return { success: false, error: 'Session not found' };
-});
+registerIpcHandler(
+  'ANALYSIS:SET_METADATA',
+  async (event, { fileHash, metadata }) => {
+    const session = sessionManager.getSession(fileHash);
+    if (session) {
+      session.metadata = { ...session.metadata, ...metadata };
+      return { success: true };
+    }
+    return { success: false, error: 'Session not found' };
+  },
+);
 
 // Helper function to determine form
 function determineForm(sections) {
@@ -697,16 +962,26 @@ function determineForm(sections) {
 function sendMacro(macroId) {
   // 1. Look up the macro in the database
   const database = db.getDb();
-  const stmt = database.prepare('SELECT name, actions_json FROM Mappings WHERE id = ?');
+  const stmt = database.prepare(
+    'SELECT name, actions_json FROM Mappings WHERE id = ?',
+  );
   const mapping = stmt.get([macroId]);
   stmt.free();
 
-  if (mapping && mapping.length > 0 && mapping[0] && mapping[0].values && mapping[0].values.length > 0 && mapping[0].values[0] && mapping[0].values[0].length > 0) {
+  if (
+    mapping &&
+    mapping.length > 0 &&
+    mapping[0] &&
+    mapping[0].values &&
+    mapping[0].values.length > 0 &&
+    mapping[0].values[0] &&
+    mapping[0].values[0].length > 0
+  ) {
     const mappingName = mapping[0].values[0][0];
     if (mainWindow) {
       mainWindow.webContents.send('DEBUG:MIDI_ABSTRACTED', mappingName);
     }
-    
+
     // Safely log - handle broken pipe errors
     try {
       console.log(`Executing Macro ${mappingName}`);
