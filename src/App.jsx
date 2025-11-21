@@ -7,6 +7,7 @@ import LibraryView from './views/LibraryView';
 import AnalysisJobManager from './components/AnalysisJobManager';
 import Toolbar from './components/Toolbar';
 import ThemeEditor from './components/settings/ThemeEditor';
+import SettingsView from './views/SettingsView';
 import SandboxView from './views/SandboxView';
 
 function App() {
@@ -148,14 +149,14 @@ function App() {
         {activeTab === 'Connections' && <Connections />}
         {activeTab === 'Mapper' && <Mapper />}
         {activeTab === 'Analysis' && <AnalysisJobManager />}
-        {activeTab === 'Settings' && <ThemeEditor />}
+        {activeTab === 'Settings' && <SettingsView />}
         {activeTab === 'Library' && <LibraryView />}
         {activeTab === 'Sandbox' && <SandboxView data={sandboxContext || {}} />}
       </div>
 
       <footer className="border-t border-border p-2.5">
         <div className="max-w-5xl mx-auto flex justify-center">
-          <Toolbar openSandbox={() => setActiveTab('Sandbox')} />
+          <Toolbar openSandbox={() => setActiveTab('Sandbox')} openSettings={() => setActiveTab('Settings')} />
         </div>
       </footer>
     </div>

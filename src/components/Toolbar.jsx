@@ -2,7 +2,7 @@ import React from 'react';
 import useAppIPC from '../hooks/useAppIPC';
 import { Button } from './ui/button';
 
-export default function Toolbar({ openSandbox } = {}) {
+export default function Toolbar({ openSandbox, openSettings } = {}) {
   const { sendCommand, status, connected } = useAppIPC();
 
   // status is expected to contain { isPlaying, isRecording, bpm, ... }
@@ -81,6 +81,13 @@ export default function Toolbar({ openSandbox } = {}) {
           Sandbox
         </Button>
       ) : null}
+      <Button
+        onClick={() => openSettings && openSettings()}
+        className="ml-2 px-2 py-1 text-xs"
+        title="Settings"
+      >
+        🎨 Theme
+      </Button>
     </div>
   );
 }
