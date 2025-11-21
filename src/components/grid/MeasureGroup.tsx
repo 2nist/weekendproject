@@ -21,7 +21,7 @@ export const MeasureGroup: React.FC<MeasureGroupProps> = ({
       </div>
 
       {/* The Group of 4 Cards */}
-      <div className="flex gap-2 bg-gray-900 p-2 rounded-xl border border-gray-800">
+      <div className="flex gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800">
         {measure.beats.map((beat, i) => {
           // Determine harmonic function variant
           let harmonicVariant: any = 'rest';

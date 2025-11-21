@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import useAppIPC from '../hooks/useAppIPC';
 import { Button } from './ui/button';
+import AnalysisTuner from './tools/AnalysisTuner';
 
 export default function Toolbar({ openSandbox, openSettings } = {}) {
   const { sendCommand, status, connected } = useAppIPC();
+  const [showTuner, setShowTuner] = useState(false);
 
   // status is expected to contain { isPlaying, isRecording, bpm, ... }
   const isPlaying = Boolean(status?.isPlaying);
@@ -71,6 +73,20 @@ export default function Toolbar({ openSandbox, openSettings } = {}) {
 
       <div className="ml-4 text-sm text-muted-foreground">
         BPM: <span className="font-medium">{status?.bpm ?? '—'}</span>
+      </div>
+      <div className="ml-4 relative">
+        <Button
+          onClick={() => setShowTuner((s) => !s)}
+          className="ml-2 px-2 py-1 text-xs"
+          title="Analysis Lab"
+        >
+          🎛️ Analysis Lab
+        </Button>
+        {showTuner && (
+          <div className="absolute right-0 bottom-12 z-50">
+            <AnalysisTuner fileHash={window.__lastAnalysisHash || null} onUpdate={() => {}} />
+          </div>
+        )}
       </div>
       {openSandbox ? (
         <Button

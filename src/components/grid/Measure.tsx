@@ -29,7 +29,7 @@ export const Measure = ({
         </button>
       </div>
 
-      <div className="flex gap-2 p-2 bg-slate-950/50 rounded-2xl border border-slate-800/50 group-hover:border-slate-700 transition-colors">
+      <div className="flex gap-1 p-1 bg-slate-950/50 rounded-2xl border border-slate-800/50 group-hover:border-slate-700 transition-colors">
         {children}
       </div>
     </div>

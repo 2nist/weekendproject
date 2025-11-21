@@ -85,8 +85,13 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
     onSectionClone?.(section);
   };
 
-  // Calculate measure width (approximate: 4 beats * 80px + gaps)
-  const measureWidth = 4 * 80 + 3 * 8 + 16; // 4 cards + 3 gaps + padding
+  // Calculate measure width based on the number of beats in a measure
+  const cardWidthPx = 32; // pixel width of the small beat card
+  const gapPx = 8; // gap between cards
+  const measurePaddingPx = 16; // container padding
+  const beatsPerMeasure = section.measures[0]?.beats?.length || 4;
+  const measureWidth =
+    beatsPerMeasure * cardWidthPx + Math.max(0, beatsPerMeasure - 1) * gapPx + measurePaddingPx;
 
   return (
     <div
@@ -150,7 +155,7 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
           ))}
 
           {/* Measures */}
-          <div className="flex flex-wrap gap-4 pt-6">
+          <div className="flex flex-wrap gap-2 pt-4">
             {section.measures.map((measure) => (
               <MeasureComponent
                 key={measure.index}

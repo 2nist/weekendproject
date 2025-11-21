@@ -291,8 +291,7 @@ registerIpcHandler(
     } catch (err) {
       return { success: false, error: err.message || String(err) };
     }
-  },
-);
+  });
 app.on('window-all-closed', function () {
   if (process.platform !== 'darwin') {
     app.quit();
@@ -453,19 +452,27 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
     session.setState('pass2');
     tracker.update('pass2', 0);
     tracker.broadcast();
+    // 🔴 AGGRESSIVE OVERSHOOT CONFIGURATION
     const architectOptions = {
-      forceOverSeg: true,
-      noveltyKernel: 9,
-      mergeChromaThreshold: 0.85,
-      exactChromaThreshold: 0.95,
-      exactMfccThreshold: 0.7,
-      progressionSimilarityThreshold: 0.8,
-      progressionSimilarityMode: 'normalized',
-      minSectionsStop: 8,
-      minSectionDurationSec: 8,
       // Downsample factor used by architect to avoid OOM on long songs
       downsampleFactor: 4,
-      // Enable microMergeBar and aggressive progression by default? Not needed yet
+      // 1. Sensitivity: Make it look for tiny changes
+      forceOverSeg: true,
+      noveltyKernel: 3,
+      sensitivity: 0.6,
+
+      // 2. The "Anti-Merge" Wall: Prevent merging unless identical
+      mergeChromaThreshold: 0.99,
+      exactChromaThreshold: 0.99,
+      exactMfccThreshold: 0.95,
+
+      // 3. Theory Glue: Turn it off or make it strict
+      progressionSimilarityThreshold: 0.95,
+      progressionSimilarityMode: 'normalized',
+
+      // 4. Duration: Allow short phrases
+      minSectionsStop: 20,
+      minSectionDurationSec: 4,
     };
     console.log('Applying Golden Architecture Config:', architectOptions);
     const structural_map = await architect.analyzeStructure(
@@ -671,7 +678,7 @@ registerIpcHandler('ANALYSIS:PARSE_MIDI', async (event, payload) => {
 // Fast re-calculation of chord events for an existing analysis (no Python)
 registerIpcHandler(
   'ANALYSIS:RECALC_CHORDS',
-  async (event, { fileHash, globalKey, commit = false }) => {
+  async (event, { fileHash, options = {} }) => {
     try {
       if (!fileHash) throw new Error('fileHash required');
       const analysis = db.getAnalysis(fileHash);
@@ -679,31 +686,53 @@ registerIpcHandler(
         throw new Error('Analysis not found');
       // Try to invoke listener's recalcChords if available
       if (listener && listener.recalcChords) {
-        // Add globalKey to metadata so chord analyzer can pick it up
+        // Add detection options + globalKey to metadata so chord analyzer can pick it up
         const cloned = JSON.parse(JSON.stringify(analysis.linear_analysis));
         if (!cloned.metadata) cloned.metadata = {};
-        if (globalKey) {
-          // Override the detected_key so TS analyzer will use it
-          cloned.metadata.detected_key = globalKey;
-          cloned.metadata.detected_mode =
-            cloned.metadata.detected_mode || 'major';
-          cloned.metadata.user_override_key = globalKey;
+        const opt = options || {};
+        const mergedOptions = {
+          globalKey:
+            opt.globalKey ||
+            analysis.harmonic_context?.global_key?.primary_key ||
+            cloned.metadata.detected_key,
+          temperature: opt.temperature ?? 0.1,
+          transitionProb: opt.transitionProb ?? 0.8,
+          diatonicBonus: opt.diatonicBonus ?? 0.1,
+          rootPeakBias: opt.rootPeakBias ?? 0.1,
+          frameHop:
+            cloned.metadata?.frame_hop_seconds ||
+            cloned.metadata?.hop_length / cloned.metadata?.sample_rate ||
+            0.0232,
+          rootOnly: opt.rootOnly === undefined ? true : !!opt.rootOnly,
+        };
+        if (mergedOptions.globalKey) {
+          cloned.metadata.detected_key = mergedOptions.globalKey;
+          cloned.metadata.detected_mode = cloned.metadata.detected_mode || 'major';
+          cloned.metadata.user_override_key = mergedOptions.globalKey;
         }
-        const res = listener.recalcChords(cloned, { globalKey });
+        const res = listener.recalcChords(cloned, mergedOptions);
         if (!res || !res.success)
           throw new Error(res?.error || 'recalc failed');
-        if (commit) {
+        if (options.commit) {
           // Persist changes to DB by updating the analysis linear_analysis
           analysis.linear_analysis.events = res.events;
           // Update the harmonic_context if globalKey overridden
-          if (globalKey) {
+          if (mergedOptions.globalKey) {
             analysis.harmonic_context = analysis.harmonic_context || {};
             analysis.harmonic_context.global_key =
               analysis.harmonic_context.global_key || {};
-            analysis.harmonic_context.global_key.primary_key = globalKey;
+            analysis.harmonic_context.global_key.primary_key = mergedOptions.globalKey;
             analysis.harmonic_context.global_key.confidence =
               analysis.harmonic_context.global_key.confidence || 0.95;
           }
+          // Persist chosen analyzer tuning into harmonic_context for transparency
+          analysis.harmonic_context = analysis.harmonic_context || {};
+          analysis.harmonic_context.chord_analyzer_options =
+            analysis.harmonic_context.chord_analyzer_options || {};
+          analysis.harmonic_context.chord_analyzer_options = {
+            ...(analysis.harmonic_context.chord_analyzer_options || {}),
+            ...(mergedOptions || {}),
+          };
           // call DB update to modify the existing analysis row
           const success = db.updateAnalysisById(analysis.id, analysis);
           if (!success) throw new Error('Failed to commit analysis update');
@@ -712,6 +741,63 @@ registerIpcHandler(
       }
       // Fallback: no listener helper exposed
       throw new Error('Listener recalc not available');
+    } catch (err) {
+      return { success: false, error: err.message || String(err) };
+    }
+  });
+
+// Grid transformation (fast, in-memory/preview by default)
+registerIpcHandler(
+  'ANALYSIS:TRANSFORM_GRID',
+  async (event, { fileHash, operation, value = 0, commit = false }) => {
+    try {
+      if (!fileHash) throw new Error('fileHash required');
+      const analysis = db.getAnalysis(fileHash);
+      if (!analysis || !analysis.linear_analysis)
+        throw new Error('Analysis not found');
+      const cloned = JSON.parse(JSON.stringify(analysis.linear_analysis));
+      cloned.beat_grid = cloned.beat_grid || { beat_timestamps: [] };
+      const grid = cloned.beat_grid;
+      const beatTimestamps = grid.beat_timestamps || [];
+
+      if (operation === 'double_time') {
+        // Insert midpoints between consecutive beats
+        const doubled = [];
+        for (let i = 0; i < beatTimestamps.length - 1; i++) {
+          const a = beatTimestamps[i];
+          const b = beatTimestamps[i + 1];
+          doubled.push(a);
+          doubled.push((a + b) / 2);
+        }
+        // push last beat
+        if (beatTimestamps.length > 0) doubled.push(beatTimestamps[beatTimestamps.length - 1]);
+        grid.beat_timestamps = doubled;
+        grid.tempo_bpm = (grid.tempo_bpm || 120) * 2;
+      } else if (operation === 'half_time') {
+        grid.beat_timestamps = beatTimestamps.filter((_, i) => i % 2 === 0);
+        grid.tempo_bpm = (grid.tempo_bpm || 120) / 2;
+      } else if (operation === 'shift') {
+        // value is seconds offset (can be negative)
+        grid.beat_timestamps = beatTimestamps.map((t) => t + value);
+      } else if (operation === 'set_bpm') {
+        const bpm = Number(value) || grid.tempo_bpm || 120;
+        // Rescale timestamps so their density reflects new tempo
+        if (bpm <= 0) throw new Error('Invalid BPM');
+        const currentTempo = grid.tempo_bpm || bpm;
+        const scaling = currentTempo > 0 ? currentTempo / bpm : 1.0;
+        grid.beat_timestamps = beatTimestamps.map((t) => t * scaling);
+        grid.tempo_bpm = bpm;
+      } else {
+        throw new Error('Unsupported operation');
+      }
+
+      if (commit) {
+        analysis.linear_analysis.beat_grid = grid;
+        const success = db.updateAnalysisById(analysis.id, analysis);
+        if (!success) throw new Error('Failed to commit grid update');
+      }
+
+      return { success: true, beat_grid: grid };
     } catch (err) {
       return { success: false, error: err.message || String(err) };
     }
@@ -724,6 +810,35 @@ registerIpcHandler('ANALYSIS:GET_BY_ID', async (event, analysisId) => {
     const res = db.getAnalysisById(analysisId);
     if (!res) return { success: false, error: 'Not found' };
     return { success: true, analysis: res };
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+// Re-segment the structure (fast-ish) by re-running architect + theorist on existing linear_analysis
+registerIpcHandler('ANALYSIS:RESEGMENT', async (event, { fileHash, options = {}, commit = false }) => {
+  try {
+    if (!fileHash) throw new Error('fileHash required');
+    const analysis = db.getAnalysis(fileHash);
+    if (!analysis || !analysis.linear_analysis) throw new Error('Analysis not found');
+    // merge defaults with provided options
+    const architectOptions = {
+      downsampleFactor: options.downsampleFactor || 4,
+      forceOverSeg: options.forceOverSeg === undefined ? false : !!options.forceOverSeg,
+      noveltyKernel: options.noveltyKernel || 5,
+      sensitivity: options.sensitivity || 0.6,
+      mergeChromaThreshold: options.mergeChromaThreshold || 0.92,
+      minSectionDurationSec: options.minSectionDurationSec || 8.0,
+    };
+    const structural_map = await architect.analyzeStructure(analysis.linear_analysis, (p) => {}, architectOptions);
+    if (!structural_map) throw new Error('architect failed');
+    const corrected = await theorist.correctStructuralMap(structural_map, analysis.linear_analysis, analysis.metadata || {}, (p) => {});
+    if (commit) {
+      analysis.structural_map = corrected;
+      const success = db.updateAnalysisById(analysis.id, analysis);
+      if (!success) throw new Error('Failed to commit resegment');
+    }
+    return { success: true, structural_map: corrected };
   } catch (err) {
     return { success: false, error: err.message || String(err) };
   }

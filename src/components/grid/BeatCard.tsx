@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 
 // 1. Define the Base Styles & Variants
 const beatCardVariants = cva(
-  'relative h-32 w-24 rounded-xl border-2 flex flex-col items-center justify-center transition-all duration-200 cursor-pointer hover:scale-105 active:scale-95',
+  'relative h-10 w-8 rounded-md border-2 flex flex-col items-center justify-center transition-all duration-200 cursor-pointer hover:scale-105 active:scale-95',
   {
     variants: {
       function: {
@@ -67,27 +67,27 @@ export const BeatCard = ({
       )}
       {...props}
     >
-      <span className="absolute top-2 left-2 text-[10px] font-mono opacity-50">
+      <span className="absolute top-1 left-1 text-xs font-mono opacity-50">
         {typeof beatIndex === 'number' ? beatIndex + 1 : ''}
       </span>
 
       {chord ? (
-        <span className="text-2xl font-black tracking-tighter">{chord}</span>
+        <span className="text-base font-bold tracking-tighter">{chord}</span>
       ) : (
-        <span className="text-3xl opacity-10">−</span>
+        <span className="text-xl opacity-10">−</span>
       )}
 
       {roman && (
-        <span className="absolute bottom-2 right-2 text-[10px] font-bold px-2 py-0.5 bg-black/40 rounded-full backdrop-blur-sm">
+        <span className="absolute bottom-1 right-1 text-xs font-bold px-1 py-0.5 bg-black/40 rounded-full backdrop-blur-sm">
           {roman}
         </span>
       )}
       {/* Drum indicators */}
       {isKick && (
-        <span className="absolute bottom-2 left-2 w-2 h-2 rounded-full bg-music-kick shadow-[0_2px_6px_hsl(var(--music-kick)/0.4)]" />
+        <span className="absolute bottom-1 left-1 w-1 h-1 rounded-full bg-music-kick shadow-[0_1px_3px_hsl(var(--music-kick)/0.4)]" />
       )}
       {isSnare && (
-        <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-music-snare shadow-[0_2px_6px_hsl(var(--music-snare)/0.4)]" />
+        <span className="absolute top-1 right-1 w-1 h-1 rounded-full bg-music-snare shadow-[0_1px_3px_hsl(var(--music-snare)/0.4)]" />
       )}
     </button>
   );

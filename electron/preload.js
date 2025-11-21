@@ -33,4 +33,12 @@ contextBridge.exposeInMainWorld('electron', {
   downloadYouTube: (url) => ipcRenderer.invoke('DOWNLOADER:DOWNLOAD', url),
   recalcChords: (payload) =>
     ipcRenderer.invoke('ANALYSIS:RECALC_CHORDS', payload),
+  transformGrid: (payload) =>
+    ipcRenderer.invoke('ANALYSIS:TRANSFORM_GRID', payload),
+  resegment: (payload) =>
+    ipcRenderer.invoke('ANALYSIS:RESEGMENT', payload),
+  parseMidi: (payload) =>
+    ipcRenderer.invoke('LIBRARY:PARSE_MIDI', payload),
+  attachMidi: (payload) =>
+    ipcRenderer.invoke('LIBRARY:ATTACH_MIDI', payload),
 });

@@ -30,18 +30,25 @@ export function useStatus() {
   useEffect(() => {
     if (!window?.ipc?.on) return undefined;
 
-    const unsubStatus = window.ipc.on('UI:STATUS_UPDATE', (data) => {
+    // Define handlers inline to ensure they're stable
+    const handleStatus = (data) => {
       setStatus((s) => ({ ...s, ...(data || {}) }));
-    });
+    };
 
-    const unsubConn = window.ipc.on('UI:CONNECTED', (flag) => {
+    const handleConn = (flag) => {
       setStatus((s) => ({ ...s, connected: Boolean(flag) }));
-    });
+    };
 
-    // request initial status
+    const unsubStatus = window.ipc.on('UI:STATUS_UPDATE', handleStatus);
+    const unsubConn = window.ipc.on('UI:CONNECTED', handleConn);
+
+    // request initial status ONCE on mount
     try {
       window.ipc.send('UI:REQUEST_STATUS');
-    } catch (e) {}
+      console.log('[useStatus] Requested initial status');
+    } catch (e) {
+      console.warn('[useStatus] Failed to request initial status:', e);
+    }
 
     return () => {
       try {
@@ -51,7 +58,7 @@ export function useStatus() {
         unsubConn && unsubConn();
       } catch (e) {}
     };
-  }, []);
+  }, []); // 🔴 Empty dependency array - only run once on mount
 
   return status;
 }
@@ -69,9 +76,11 @@ export default function useAppIPC() {
   const status = useStatus();
 
   useEffect(() => {
+    console.log('[useAppIPC] 🔵 Mounting - subscribing to blocks updates');
+
     const handleIncomingBlocks = (data) => {
       const blocksArray = Array.isArray(data) ? data : [];
-      console.log('UI:BLOCKS_UPDATE received:', blocksArray);
+      console.log('[useAppIPC] UI:BLOCKS_UPDATE received:', blocksArray.length, 'blocks');
       setBlocksState(blocksArray);
       window.__lastBlocks = blocksArray;
     };
@@ -81,9 +90,9 @@ export default function useAppIPC() {
       unsubBlocks = window.ipc.on('UI:BLOCKS_UPDATE', handleIncomingBlocks);
       try {
         window.ipc.send('UI:REQUEST_INITIAL');
-        console.log('Requested initial blocks from backend');
+        console.log('[useAppIPC] 📡 Requested initial blocks from backend (ONCE)');
       } catch (error) {
-        console.error('Error requesting initial blocks:', error);
+        console.error('[useAppIPC] Error requesting initial blocks:', error);
       }
     }
 
@@ -95,12 +104,13 @@ export default function useAppIPC() {
     }
 
     return () => {
+      console.log('[useAppIPC] 🔴 Unmounting - cleaning up subscriptions');
       try {
         unsubBlocks && unsubBlocks();
       } catch (e) {}
       window.removeEventListener('UI:BLOCKS_UPDATE', browserHandler);
     };
-  }, []);
+  }, []); // 🔴 Empty dependency array - only run once on mount
 
   const setBlocks = useCallback((value) => {
     setBlocksState((prev) => {

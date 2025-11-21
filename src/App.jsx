@@ -9,11 +9,13 @@ import Toolbar from './components/Toolbar';
 import ThemeEditor from './components/settings/ThemeEditor';
 import SettingsView from './views/SettingsView';
 import SandboxView from './views/SandboxView';
+import AnalysisTuner from './components/tools/AnalysisTuner';
 
 function App() {
   const [activeTab, setActiveTab] = React.useState('Architect');
   const [sandboxContext, setSandboxContext] = React.useState(null);
   const [error, setError] = React.useState(null);
+  const [showAnalysisTuner, setShowAnalysisTuner] = React.useState(false);
 
   React.useEffect(() => {
     // Catch any unhandled errors
@@ -140,11 +142,26 @@ function App() {
             >
               Sandbox
             </button>
+            <button
+              onClick={() => setShowAnalysisTuner((s) => !s)}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
+                showAnalysisTuner
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Analysis Lab
+            </button>
           </nav>
         </div>
       </header>
 
       <div className="flex-1 overflow-auto">
+        {showAnalysisTuner && (
+          <div className="fixed z-50 top-16 right-8 bg-slate-900 p-3 rounded shadow-lg border border-slate-800">
+            <AnalysisTuner fileHash={globalThis.__currentFileHash || sandboxContext?.fileHash || null} onUpdate={() => {}} />
+          </div>
+        )}
         {activeTab === 'Architect' && <ArchitectNew />}
         {activeTab === 'Connections' && <Connections />}
         {activeTab === 'Mapper' && <Mapper />}

@@ -65,7 +65,21 @@ export function transformAnalysisToGrid(
   // Calculate beats per second
   const beatsPerSecond = tempoBpm / 60;
   const secondsPerBeat = 1 / beatsPerSecond;
-  const beatsPerMeasure = 4; // Assuming 4/4 time
+  // Derive beats per measure from the detected beat grid time signature when present
+  let beatsPerMeasure = 4; // default 4/4
+  try {
+    const timeSig = linearAnalysis?.beat_grid?.time_signature;
+    if (typeof timeSig === 'string' && timeSig.includes('/')) {
+      const parts = timeSig.split('/');
+      const num = parseInt(parts[0], 10);
+      if (!isNaN(num) && num > 0) beatsPerMeasure = num;
+    } else if (typeof timeSig === 'object' && timeSig !== null) {
+      const num = Number(timeSig?.numerator || timeSig?.num || timeSig?.beatsPerBar);
+      if (!isNaN(num) && num > 0) beatsPerMeasure = num;
+    }
+  } catch (e) {
+    beatsPerMeasure = 4;
+  }
 
   // If we have downbeats, use them; otherwise calculate from tempo
   const measures: Measure[] = [];

@@ -6,3 +6,16 @@ build
 *.log
 .DS_Store
 package-lock.json
+
+# Audio & large binary test assets (ignore, not versioned)
+electron/analysis/test/*.mp3
+tmp/
+tmp_downloads/
+benchmarks/results/*.mp3
+benchmarks/results/*.wav
+
+# Optional debug HTML/report outputs (regenerate)
+benchmarks/results/*.html
+benchmarks/results/*.json
+tmp_out.json
+
