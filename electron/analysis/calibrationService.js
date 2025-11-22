@@ -129,7 +129,7 @@ const SONGS = [
 ];
 
 async function analyzeSong(audioPath, progressCallback) {
-  const metadata = metadataLookup.gatherMetadata(audioPath, {});
+  const metadata = await metadataLookup.gatherMetadata(audioPath, {});
   const analysisResult = await listener.analyzeAudio(
     audioPath,
     progressCallback || (() => {}),

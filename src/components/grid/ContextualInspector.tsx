@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { X, Trash2, Copy, Scissors } from 'lucide-react';
+import type { SelectionTarget } from '@/types/editor';
 
+// Legacy type alias for backward compatibility
 export type SelectedObject = 
   | { type: 'beat'; data: any }
   | { type: 'measure'; data: any }

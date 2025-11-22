@@ -12,6 +12,7 @@ import SettingsView from './views/SettingsView';
 import SandboxView from './views/SandboxView';
 import AnalysisTuner from './components/tools/AnalysisTuner';
 import { BlocksProvider } from './contexts/BlocksContext';
+import { EditorProvider } from './contexts/EditorContext';
 
 function App() {
   const navigate = useNavigate();
@@ -230,7 +231,14 @@ function App() {
           <Route path="/analysis" element={<AnalysisJobManager />} />
           <Route path="/settings" element={<SettingsView />} />
           <Route path="/library" element={<LibraryView />} />
-          <Route path="/sandbox" element={<SandboxView data={sandboxContext || {}} />} />
+          <Route 
+            path="/sandbox" 
+            element={
+              <EditorProvider initialData={sandboxContext || null}>
+                <SandboxView data={sandboxContext || {}} />
+              </EditorProvider>
+            } 
+          />
         </Routes>
       </div>
 

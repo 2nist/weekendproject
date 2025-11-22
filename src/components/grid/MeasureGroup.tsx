@@ -1,5 +1,5 @@
 import React from 'react';
-import { Measure, BeatNode } from '../../utils/musicTimeTransform';
+import type { Measure, BeatNode } from '../../types/audio';
 import { BeatCard } from './BeatCard';
 
 interface MeasureGroupProps {

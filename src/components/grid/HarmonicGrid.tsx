@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Section, BeatNode, ProgressionGroup } from '../../utils/musicTimeTransform';
+import type { Section, BeatNode, ProgressionGroup } from '../../types/audio';
 import { transformAnalysisToGrid, detectProgressionGroups } from '../../utils/musicTimeTransform';
 import { SectionContainer } from './SectionContainer';
 
@@ -92,7 +92,7 @@ export const HarmonicGrid: React.FC<HarmonicGridProps> = ({
 
   if (!linearAnalysis) {
     return (
-      <div className="p-8 text-center text-gray-400">
+      <div className="p-8 text-center text-muted-foreground border-dashed border-border rounded-lg">
         No analysis data available. Please run an analysis first.
       </div>
     );
@@ -100,19 +100,19 @@ export const HarmonicGrid: React.FC<HarmonicGridProps> = ({
 
   if (sections.length === 0) {
     return (
-      <div className="p-8 text-center text-gray-400">
+      <div className="p-8 text-center text-muted-foreground border-dashed border-border rounded-lg">
         No sections detected in the analysis.
       </div>
     );
   }
 
   return (
-    <div className="w-full p-6 bg-slate-900 min-h-screen">
+    <div className="w-full p-6 bg-background min-h-screen">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-6">
-          <h2 className="text-2xl font-bold text-white mb-2">Harmonic Grid</h2>
-          <p className="text-gray-400 text-sm">
+          <h2 className="text-2xl font-bold text-foreground mb-2">Harmonic Grid</h2>
+          <p className="text-muted-foreground text-sm">
             Click beats to select, double-click to edit. Drag sections to reorder.
           </p>
         </div>
@@ -135,26 +135,26 @@ export const HarmonicGrid: React.FC<HarmonicGridProps> = ({
 
         {/* Edit Modal (placeholder - implement as needed) */}
         {editingBeat && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full">
-              <h3 className="text-xl font-bold text-white mb-3">Edit Beat</h3>
-              <p className="text-gray-400 mb-4 text-sm">
+          <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-card border border-border rounded-lg p-6 max-w-md w-full shadow-lg">
+              <h3 className="text-xl font-bold text-foreground mb-3">Edit Beat</h3>
+              <p className="text-muted-foreground mb-4 text-sm">
                 Beat {editingBeat.beatIndex + 1} at {editingBeat.timestamp.toFixed(2)}s
               </p>
               <label className="block mb-4">
-                <span className="text-xs uppercase tracking-wider text-gray-400">Chord Label</span>
+                <span className="text-xs uppercase tracking-wider text-muted-foreground">Chord Label</span>
                 <input
                   autoFocus
                   value={chordInput}
                   onChange={(e) => setChordInput(e.target.value)}
                   placeholder="e.g. Cmaj7 or I"
-                  className="mt-1 w-full px-3 py-2 rounded bg-gray-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="mt-1 w-full px-3 py-2 rounded bg-background border border-input text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </label>
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={() => setEditingBeat(null)}
-                  className="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600 text-sm"
+                  className="px-4 py-2 bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 text-sm"
                 >
                   Cancel
                 </button>
@@ -169,7 +169,7 @@ export const HarmonicGrid: React.FC<HarmonicGridProps> = ({
                     }
                     setEditingBeat(null);
                   }}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-500 text-sm font-semibold"
+                  className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 text-sm font-semibold"
                 >
                   Save
                 </button>

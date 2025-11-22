@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useAnalysisSandbox } from '@/hooks/useAnalysisSandbox';
+import { useEditor } from '@/contexts/EditorContext';
 import { SectionContainer } from '@/components/grid/SectionContainer';
 import { Measure } from '@/components/grid/Measure';
 import { BeatCard } from '@/components/grid/BeatCard';
@@ -8,21 +9,21 @@ import ProgressionOverlay from '@/components/grid/ProgressionOverlay';
 import { Button } from '@/components/ui/button';
 import { Save, Play, Pause, Paintbrush, Eye, GraduationCap } from 'lucide-react';
 import { AudioEngine, AudioEngineRef } from '@/components/player/AudioEngine';
-import { ContextualInspector, SelectedObject } from '@/components/grid/ContextualInspector';
+import { ContextualInspector } from '@/components/grid/ContextualInspector';
 import { NavigationTimeline } from '@/components/grid/NavigationTimeline';
+import type { SelectionTarget } from '@/types/editor';
 
 export const SandboxView = ({ data }: { data: any }) => {
   const { grid, sections, progressionGroups, globalKey, actions, isDirty, isProcessing } =
-    useAnalysisSandbox(data);
+    useAnalysisSandbox();
+  const { state, actions: editorActions } = useEditor();
+  const { selection } = state;
   
   // Audio playback state
   const audioRef = useRef<AudioEngineRef>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioSrc, setAudioSrc] = useState<string | undefined>(undefined);
-  
-  // Selection state for ContextualInspector
-  const [selectedObject, setSelectedObject] = useState<SelectedObject>(null);
   
   // Paint Mode state
   const [paintMode, setPaintMode] = useState(false);
@@ -36,25 +37,27 @@ export const SandboxView = ({ data }: { data: any }) => {
   // Ref for scrollable container
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   
-  // Get duration and novelty curve from data
-  const duration = data?.linear_analysis?.metadata?.duration_seconds || 0;
-  const noveltyCurve = data?.structural_map?.debug?.noveltyCurve || 
-                       data?.structural_map?.debug?.novelty_curve || 
+  // Get duration and novelty curve from songData
+  const songData = state.songData;
+  const duration = songData?.linear_analysis?.metadata?.duration_seconds || 0;
+  const noveltyCurve = songData?.structural_map?.debug?.noveltyCurve || 
+                       songData?.structural_map?.debug?.novelty_curve || 
                        [];
   
   // Expose current fileHash globally for AnalysisTuner to consume
   useEffect(() => {
-    if (data?.fileHash || data?.file_hash) {
-      globalThis.__currentFileHash = data.fileHash || data.file_hash;
+    const fileHash = songData?.fileHash || songData?.file_hash;
+    if (fileHash) {
+      globalThis.__currentFileHash = fileHash;
     }
-  }, [data]);
+  }, [songData]);
 
   // Get audio file path from analysis data
   useEffect(() => {
-    if (data?.file_path) {
+    if (songData?.file_path) {
       // Convert Windows path to file:// URL for Electron
       // Handle both Windows (C:\path) and Unix (/path) paths
-      let fileUrl = data.file_path;
+      let fileUrl = songData.file_path;
       if (!fileUrl.startsWith('file://')) {
         // Normalize path separators and add file:// protocol
         fileUrl = fileUrl.replace(/\\/g, '/');
@@ -73,7 +76,7 @@ export const SandboxView = ({ data }: { data: any }) => {
       }
       setAudioSrc(fileUrl);
     }
-  }, [data?.file_path]);
+  }, [songData?.file_path]);
 
   // Handle time updates from audio
   const handleTimeUpdate = useCallback((time: number) => {
@@ -108,19 +111,19 @@ export const SandboxView = ({ data }: { data: any }) => {
       audioRef.current.seek(beat.timestamp);
     }
     
-    // Select beat in sidebar
-    setSelectedObject({ type: 'beat', data: beat });
-  }, []);
+    // Select beat using EditorContext
+    editorActions.selectObject('beat', beat.id || beat.timestamp?.toString(), beat);
+  }, [editorActions]);
 
   // Handle measure click
   const handleMeasureClick = useCallback((measure: any) => {
-    setSelectedObject({ type: 'measure', data: measure });
-  }, []);
+    editorActions.selectObject('measure', measure.index?.toString() || measure.id, measure);
+  }, [editorActions]);
 
   // Handle section click
   const handleSectionClick = useCallback((section: any) => {
-    setSelectedObject({ type: 'section', data: section });
-  }, []);
+    editorActions.selectObject('section', section.section_id || section.id, section);
+  }, [editorActions]);
 
   // Handle chord change from Inspector (for paint mode)
   const handleChordChange = useCallback((chord: string | null) => {
@@ -152,14 +155,11 @@ export const SandboxView = ({ data }: { data: any }) => {
     paintedBeatsRef.current.add(beatId);
     actions.updateChord(beatId, paintChord);
     
-    // Update the beat data in selectedObject if it's the same beat
-    if (selectedObject?.type === 'beat' && selectedObject.data.id === beatId) {
-      setSelectedObject({
-        type: 'beat',
-        data: { ...selectedObject.data, chordLabel: paintChord },
-      });
+    // Update the beat data in selection if it's the same beat
+    if (selection?.type === 'beat' && selection.id === beatId) {
+      editorActions.selectObject('beat', beatId, { ...selection.data, chordLabel: paintChord });
     }
-  }, [paintMode, paintChord, isDragging, actions, selectedObject]);
+  }, [paintMode, paintChord, isDragging, actions, selection, editorActions]);
 
   // Handle paint drag start
   const handlePaintDragStart = useCallback(() => {
@@ -244,7 +244,7 @@ export const SandboxView = ({ data }: { data: any }) => {
   const activeBeatId = getActiveBeat(allBeats, currentTime);
 
   return (
-    <div className="flex flex-col h-screen text-white bg-slate-950">
+    <div className="flex flex-col h-screen text-foreground bg-background">
       {/* Audio Engine (hidden) */}
       <AudioEngine
         ref={audioRef}
@@ -255,7 +255,7 @@ export const SandboxView = ({ data }: { data: any }) => {
       />
 
 
-      <div className="flex items-center h-16 gap-4 px-6 border-b border-slate-800 bg-slate-900/50 backdrop-blur">
+      <div className="flex items-center h-16 gap-4 px-6 border-b border-border bg-card/50 backdrop-blur">
         {/* Play/Pause Button */}
         <Button
           onClick={togglePlayback}
@@ -267,25 +267,25 @@ export const SandboxView = ({ data }: { data: any }) => {
           {isPlaying ? 'Pause' : 'Play'}
         </Button>
 
-        <div className="w-px h-6 bg-slate-700" />
+        <div className="w-px h-6 bg-border" />
 
         <div className="flex items-center gap-2">
-          <span className="text-sm font-bold text-slate-400">
+          <span className="text-sm font-bold text-muted-foreground">
             DETECTED KEY:
           </span>
           <KeySelector value={globalKey} onChange={actions.updateKey} />
         </div>
-        <div className="w-px h-6 mx-2 bg-slate-700" />
-        <span className="font-mono text-xs text-green-400">
+        <div className="w-px h-6 mx-2 bg-border" />
+        <span className="font-mono text-xs text-music-subdominant">
           ENGINE: VITERBI (TS) ACTIVE
         </span>
         
         {/* Paint Mode Toggle */}
-        <div className="w-px h-6 mx-2 bg-slate-700" />
+        <div className="w-px h-6 mx-2 bg-border" />
         <Button
           onClick={() => setPaintMode(!paintMode)}
           variant={paintMode ? 'default' : 'outline'}
-          className={`gap-2 ${paintMode ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border-slate-700'}`}
+          className={`gap-2 ${paintMode ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'bg-card text-foreground hover:bg-muted border-border'}`}
           title={paintMode ? 'Paint Mode: ON - Click and drag to paint chords' : 'Paint Mode: OFF - Click to enable'}
         >
           <Paintbrush className="w-4 h-4" />
@@ -293,11 +293,11 @@ export const SandboxView = ({ data }: { data: any }) => {
         </Button>
         
         {/* Confidence Heatmap Toggle */}
-        <div className="w-px h-6 mx-2 bg-slate-700" />
+        <div className="w-px h-6 mx-2 bg-border" />
         <Button
           onClick={() => setShowConfidence(!showConfidence)}
           variant={showConfidence ? 'default' : 'outline'}
-          className={`gap-2 ${showConfidence ? 'bg-cyan-600 text-white hover:bg-cyan-700' : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border-slate-700'}`}
+          className={`gap-2 ${showConfidence ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'bg-card text-foreground hover:bg-muted border-border'}`}
           title={showConfidence ? 'Confidence Heatmap: ON - Low confidence beats are ghosted' : 'Confidence Heatmap: OFF - Click to show confidence visualization'}
         >
           <Eye className="w-4 h-4" />
@@ -306,11 +306,11 @@ export const SandboxView = ({ data }: { data: any }) => {
         
         <div className="flex items-center gap-4 ml-auto">
           <div className="flex flex-col items-end mr-4">
-            <span className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold">
               State
             </span>
             <span
-              className={`text-xs font-mono ${isDirty ? 'text-amber-400' : 'text-slate-400'}`}
+              className={`text-xs font-mono ${isDirty ? 'text-accent-foreground' : 'text-muted-foreground'}`}
             >
               {isDirty ? 'UNSAVED CHANGES' : 'SYNCED'}
             </span>
@@ -321,7 +321,7 @@ export const SandboxView = ({ data }: { data: any }) => {
             <Button
               onClick={() => actions.saveChanges && actions.saveChanges()}
               disabled={!isDirty || isProcessing}
-              className={`${isDirty ? 'gap-2 font-bold transition-all bg-music-kick text-black hover:bg-music-kick/80 shadow-[0_0_15px_hsl(var(--music-kick)/0.4)]' : 'gap-2 font-bold transition-all bg-slate-800 text-slate-500'}`}
+              className={`${isDirty ? 'gap-2 font-bold transition-all bg-music-kick text-card-foreground hover:bg-music-kick/80 shadow-[0_0_15px_hsl(var(--music-kick)/0.4)]' : 'gap-2 font-bold transition-all bg-card text-muted-foreground'}`}
             >
               <Save className="w-4 h-4" />
               {isProcessing ? 'Saving...' : 'Commit Changes'}
@@ -329,7 +329,7 @@ export const SandboxView = ({ data }: { data: any }) => {
             
             {/* Dropdown Menu */}
             {!isProcessing && (
-              <div className="absolute right-0 top-full mt-1 w-56 bg-slate-800 border border-slate-700 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+              <div className="absolute right-0 top-full mt-1 w-56 bg-card border border-border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
                 <button
                   onClick={async () => {
                     try {
@@ -370,10 +370,10 @@ export const SandboxView = ({ data }: { data: any }) => {
                       alert(`Error: ${error instanceof Error ? error.message : String(error)}`);
                     }
                   }}
-                  className="w-full px-4 py-3 text-left text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2 transition-colors"
+                  className="w-full px-4 py-3 text-left text-sm text-foreground hover:bg-muted flex items-center gap-2 transition-colors"
                   title="Use your corrections to improve the AI's future accuracy"
                 >
-                  <GraduationCap className="w-4 h-4 text-cyan-400" />
+                  <GraduationCap className="w-4 h-4 text-primary" />
                   <span>Add to Calibration Set</span>
                 </button>
               </div>
@@ -392,7 +392,7 @@ export const SandboxView = ({ data }: { data: any }) => {
         >
           <div className="flex gap-6">
           {(!sections || sections.length === 0) && (
-            <div className="text-center text-slate-400 p-8">
+            <div className="text-center text-muted-foreground p-8">
               No sections available. Load an analysis to view the grid.
             </div>
           )}
@@ -436,7 +436,7 @@ export const SandboxView = ({ data }: { data: any }) => {
                               isSnare={beat.drums?.hasSnare}
                               timestamp={beat.timestamp}
                               isPlaying={activeBeatId === beat.id && isPlaying}
-                              selected={selectedObject?.type === 'beat' && selectedObject.data.id === beat.id}
+                              selected={selection?.type === 'beat' && selection.id === beat.id}
                               onEdit={() => handleBeatClick(beat)}
                               paintMode={paintMode}
                               paintChord={paintChord}
@@ -461,8 +461,8 @@ export const SandboxView = ({ data }: { data: any }) => {
 
         {/* Contextual Inspector Sidebar */}
         <ContextualInspector
-          selected={selectedObject}
-          onClose={() => setSelectedObject(null)}
+          selected={selection ? { type: selection.type, data: selection.data } : null}
+          onClose={() => editorActions.clearSelection()}
           onUpdateBeat={handleBeatUpdate}
           onUpdateSection={handleSectionUpdate}
           onChordChange={handleChordChange}

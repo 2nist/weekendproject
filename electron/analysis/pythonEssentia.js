@@ -20,12 +20,11 @@ async function checkPythonEssentia() {
  */
 async function analyzeAudioWithPython(filePath, progressCallback = () => {}) {
   return new Promise((resolve, reject) => {
-    console.log(`[PythonBridge] Spawning analysis for: ${filePath}`);
-    // Prefer HPSS-enabled analyzer when available
-    const hpssScript = path.join(__dirname, 'analyze_song_hpss.py');
-    const fallbackScript = path.join(__dirname, 'analyze_song.py');
-    const scriptPath = fs.existsSync(hpssScript) ? hpssScript : fallbackScript;
-    console.log(`[PythonBridge] Using Python analyzer script: ${scriptPath}`);
+    const logger = require('./logger');
+    logger.pass1(`[PythonBridge] Spawning analysis for: ${path.basename(filePath)}`);
+    // Use canonical analyze_song.py (formerly analyze_song_hpss.py)
+    const scriptPath = path.join(__dirname, 'analyze_song.py');
+    logger.debug(`[PythonBridge] Using Python analyzer script: analyze_song.py`);
     if (!fs.existsSync(scriptPath)) {
       return reject(new Error(`Python script not found at: ${scriptPath}`));
     }

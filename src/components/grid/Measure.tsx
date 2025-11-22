@@ -17,7 +17,7 @@ export const Measure = ({
   return (
     <div className="flex flex-col gap-2 group">
       <div className="flex justify-between items-center px-1">
-        <span className="text-xs font-mono text-slate-500 group-hover:text-slate-300 transition-colors">
+        <span className="text-xs font-mono text-muted-foreground group-hover:text-foreground transition-colors">
           BAR {barNumber}
         </span>
         <button
@@ -25,17 +25,17 @@ export const Measure = ({
             e.stopPropagation();
             onEdit?.();
           }}
-          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-slate-800 rounded transition-all"
+          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-muted rounded transition-all"
           aria-label={`Edit bar ${barNumber}`}
           type="button"
         >
-          <Settings2 className="w-3 h-3 text-slate-400" />
+          <Settings2 className="w-3 h-3 text-muted-foreground" />
         </button>
       </div>
 
       {/* CSS Grid layout for strict rhythmic alignment */}
       <div
-        className="p-1 bg-slate-900/80 rounded-2xl border border-slate-800/50 group-hover:border-slate-700 transition-colors"
+        className="p-1 bg-muted/30 rounded-2xl border border-border group-hover:border-border transition-colors"
         style={{
           display: 'grid',
           gridTemplateColumns: `repeat(${numerator}, minmax(3.5rem, 1fr))`,

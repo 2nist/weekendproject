@@ -631,7 +631,8 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
       globalKey: userHints.globalKey ?? analysisLabSettings.globalKey ?? userHints.key_hint,
     };
 
-    const metadata = metadataLookup.gatherMetadata(filePath, userHints);
+    // Pass 0: Metadata Lookup
+    const metadata = await metadataLookup.gatherMetadata(filePath, userHints);
     const fileInfo = fileProcessor.getFileInfo(filePath);
     const fileHash = fileInfo.hash;
 
@@ -775,13 +776,13 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
       functional_summary: {},
     };
 
-    // Save analysis
+    // Save analysis (CRITICAL: Use corrected_structural_map from Pass 3, not original structural_map)
     const analysisId = db.saveAnalysis({
       file_path: filePath,
       file_hash: fileHash,
       metadata,
       linear_analysis,
-      structural_map: corrected_structural_map,
+      structural_map: corrected_structural_map, // ✅ Using Pass 3 corrected output
       arrangement_flow,
       harmonic_context,
       polyrhythmic_layers: [],

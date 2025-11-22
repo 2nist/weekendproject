@@ -400,7 +400,7 @@ async function analyzeSongWithParams(
   config: EngineConfig,
   progressCallback?: (p: number) => void
 ): Promise<any> {
-  const metadata = metadataLookup.gatherMetadata(audioPath, {});
+  const metadata = await metadataLookup.gatherMetadata(audioPath, {});
   
   // Analyze audio with chord options (harmonyOptions parameter)
   const analysisResult = await listener.analyzeAudio(

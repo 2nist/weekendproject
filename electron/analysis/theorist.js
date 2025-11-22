@@ -7,6 +7,7 @@
 const { getGenreProfile } = require('./genreProfiles');
 const theoryRules = require('./theoryRules');
 const { labelSectionsWithSemantics } = require('./semanticLabeler');
+const logger = require('./logger');
 
 /**
  * Main function: Resolve progression with theory corrections
@@ -375,27 +376,92 @@ function getDominantOfKey(key) {
 }
 
 /**
+ * Get chord sequence for a section from linear analysis
+ */
+function getChordSequenceForSection(linearAnalysis, section) {
+  const timeRange = section.time_range || section;
+  const chords = [];
+  
+  if (linearAnalysis.events) {
+    for (const event of linearAnalysis.events) {
+      if (
+        (event.event_type === 'chord_candidate' || event.event_type === 'chord') &&
+        event.timestamp >= timeRange.start_time &&
+        event.timestamp < timeRange.end_time
+      ) {
+        const root = event.chord_candidate?.root_candidates?.[0]?.root || 
+                     event.chord?.root || 
+                     event.chord || 
+                     'C';
+        const quality = event.chord_candidate?.quality_candidates?.[0]?.quality ||
+                       event.chord?.quality ||
+                       'major';
+        chords.push({ root, quality, timestamp: event.timestamp });
+      }
+    }
+  }
+  
+  return chords;
+}
+
+/**
+ * Compute duration in bars for a section
+ */
+function computeDurationBars(section, linearAnalysis) {
+  const timeRange = section.time_range || section;
+  const duration = timeRange.end_time - timeRange.start_time;
+  const tempoBpm = linearAnalysis?.beat_grid?.tempo_bpm || 120;
+  const beatsPerBar = 4; // Default 4/4
+  const bars = (duration * tempoBpm) / (60 * beatsPerBar);
+  return bars;
+}
+
+/**
+ * Merge two sections
+ */
+function mergeTwoSections(sectionA, sectionB) {
+  const timeRangeA = sectionA.time_range || sectionA;
+  const timeRangeB = sectionB.time_range || sectionB;
+  
+  return {
+    ...sectionA,
+    time_range: {
+      start_time: Math.min(timeRangeA.start_time, timeRangeB.start_time),
+      end_time: Math.max(timeRangeA.end_time, timeRangeB.end_time),
+      duration_bars: (Math.max(timeRangeA.end_time, timeRangeB.end_time) - 
+                     Math.min(timeRangeA.start_time, timeRangeB.start_time)) / 2, // Approximate
+    },
+    section_id: sectionA.section_id || `merged-${sectionA.section_id || 'A'}-${sectionB.section_id || 'B'}`,
+    section_label: sectionA.section_label || sectionB.section_label || 'merged',
+  };
+}
+
+/**
  * Apply theory corrections to a structural map
+ * CRITICAL: This function must actually modify section boundaries based on cadences
  */
 async function correctStructuralMap(structuralMap, linearAnalysis, metadata, progressCallback = () => {}) {
-  console.log('Theorist: Starting correction, sections:', structuralMap?.sections?.length || 0);
+  logger.pass3('[Theorist] 🔵 Pass 3: Starting theory correction...');
+  logger.pass3('[Theorist] Input sections:', structuralMap?.sections?.length || 0);
   
   if (!structuralMap || !structuralMap.sections || structuralMap.sections.length === 0) {
-    console.warn('Theorist: No sections to correct, returning original');
+    logger.warn('[Theorist] ⚠️ No sections to correct, returning original');
     return structuralMap || { sections: [] };
   }
   
   const genreProfile = getGenreProfile(metadata.genre_hint || 'pop');
   const keyContext = {
-    primary_key: metadata.key_hint || 'C',
-    mode: metadata.mode_hint || 'ionian',
+    primary_key: metadata.key_hint || linearAnalysis?.metadata?.detected_key || 'C',
+    mode: metadata.mode_hint || linearAnalysis?.metadata?.detected_mode || 'ionian',
   };
+  
+  logger.debug('[Theorist] Key context:', keyContext.primary_key, keyContext.mode);
 
+  // STEP 1: Correct chord progressions within each section
   const correctedSections = [];
-
   for (let sectionIndex = 0; sectionIndex < structuralMap.sections.length; sectionIndex++) {
     const section = structuralMap.sections[sectionIndex];
-    progressCallback((sectionIndex / structuralMap.sections.length) * 100);
+    progressCallback((sectionIndex / structuralMap.sections.length) * 50); // First 50% for chord correction
 
     // Extract raw chords for this section from linear analysis
     const sectionChords = extractSectionChords(
@@ -403,7 +469,9 @@ async function correctStructuralMap(structuralMap, linearAnalysis, metadata, pro
       section.time_range,
     );
 
-    // Apply theory corrections
+    logger.debug(`[Theorist] Section ${sectionIndex + 1} (${section.section_label || 'unknown'}): ${sectionChords.length} chords`);
+
+    // Apply theory corrections to chords
     const correctedProgression = resolveProgression(
       sectionChords,
       genreProfile,
@@ -428,12 +496,76 @@ async function correctStructuralMap(structuralMap, linearAnalysis, metadata, pro
     }
   }
 
-  progressCallback(100);
+  logger.pass3('[Theorist] ✅ Chord corrections complete. Starting section boundary correction...');
 
+  // STEP 2: Merge sections that don't end on cadences (CRITICAL FIX)
+  let working = correctedSections.slice();
+  let changed = true;
+  let mergeCount = 0;
+  const minSectionsStop = 4; // Don't merge below 4 sections
+  const minBarsForMerge = 4; // Merge sections shorter than 4 bars if no cadence
+
+  while (changed && working.length > minSectionsStop) {
+    changed = false;
+    for (let i = 0; i < working.length - 1; i++) {
+      const sectionA = working[i];
+      const sectionB = working[i + 1];
+      
+      const aBars = computeDurationBars(sectionA, linearAnalysis);
+      const bBars = computeDurationBars(sectionB, linearAnalysis);
+      const isShort = aBars < minBarsForMerge || bBars < minBarsForMerge;
+      
+      // Get chord sequences at boundary
+      const leftSeq = getChordSequenceForSection(linearAnalysis, sectionA);
+      const rightSeq = getChordSequenceForSection(linearAnalysis, sectionB);
+      const lastTwoLeft = leftSeq.slice(-2);
+      const firstTwoRight = rightSeq.slice(0, 2);
+      const combined = [...lastTwoLeft, ...firstTwoRight].filter(Boolean);
+      
+      // Check for cadence at boundary
+      const cadence = theoryRules.detectCadenceContext(combined, keyContext);
+      
+      logger.debug(`[Theorist] Checking boundary between Section ${i + 1} and ${i + 2}:`);
+      logger.debug(`[Theorist]   Section A: ${aBars.toFixed(1)} bars, Section B: ${bBars.toFixed(1)} bars`);
+      logger.debug(`[Theorist]   Cadence: ${cadence}`);
+      logger.debug(`[Theorist]   Last 2 chords of A: ${lastTwoLeft.map(c => c.root).join(', ')}`);
+      logger.debug(`[Theorist]   First 2 chords of B: ${firstTwoRight.map(c => c.root).join(', ')}`);
+      
+      // Merge if no cadence and one section is short
+      if (cadence === 'NONE' && isShort) {
+        logger.pass3(`[Theorist] ✅ MERGING: No cadence detected and section is short (${aBars.toFixed(1)}/${bBars.toFixed(1)} bars)`);
+        const merged = mergeTwoSections(sectionA, sectionB);
+        working.splice(i, 2, merged);
+        changed = true;
+        mergeCount++;
+        break; // Restart loop after merge
+      } else if (cadence !== 'NONE') {
+        logger.debug(`[Theorist] ✅ VALID: Cadence detected (${cadence}) - keeping boundary`);
+      } else {
+        logger.debug(`[Theorist] ℹ️ KEEPING: Both sections are long enough (${aBars.toFixed(1)}/${bBars.toFixed(1)} bars)`);
+      }
+    }
+    
+    // Allow event loop to process
+    if (changed) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+  }
+
+  logger.pass3(`[Theorist] ✅ Section boundary correction complete. Merged ${mergeCount} boundaries.`);
+  logger.pass3(`[Theorist] Final section count: ${working.length} (was ${correctedSections.length})`);
+
+  progressCallback(90);
+
+  // STEP 3: Semantic labeling
   const semanticallyLabeled = labelSectionsWithSemantics(
-    correctedSections,
+    working,
     linearAnalysis?.metadata || metadata,
   );
+
+  progressCallback(100);
+  
+  logger.pass3('[Theorist] ✅ Pass 3 Complete!');
 
   return {
     ...structuralMap,

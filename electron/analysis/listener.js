@@ -8,10 +8,11 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { getEssentia, loadAudioFile } = require('./essentiaLoader');
+const logger = require('./logger');
+const { getEssentia, loadAudioFile } = require('./fallbacks/essentiaLoader');
 const { prepareAudioFile, cleanupTempFile } = require('./fileProcessor');
 const pythonEssentia = require('./pythonEssentia');
-const simpleAnalyzer = require('./simpleAudioAnalyzer');
+const simpleAnalyzer = require('./fallbacks/simpleAudioAnalyzer');
 const {
   calculateRMS,
   calculateChromaFlux,
@@ -34,14 +35,14 @@ try {
     const CA2 = require('./chordAnalyzer');
     ChordAnalyzer = CA2 && CA2.default ? CA2.default : CA2;
   } catch (err2) {
-    console.warn(
+    logger.warn(
       'ChordAnalyzer not loaded; TS analyzer disabled',
       err2?.message || err?.message,
     );
     ChordAnalyzer = null;
   }
 }
-console.log(
+logger.debug(
   '[ChordAnalyzer] status:',
   ChordAnalyzer ? 'loaded' : 'unavailable',
 );
@@ -71,7 +72,7 @@ function runTypeScriptChordAnalyzer(linearAnalysis, opts = {}, structuralMap = n
       linearAnalysis,
       mergedOpts,
     );
-    console.log('[ChordAnalyzer] detection result:', {
+    logger.debug('[ChordAnalyzer] detection result:', {
       chromaFrames: linearAnalysis?.chroma_frames?.length || 0,
       beatTimestamps: linearAnalysis?.beat_grid?.beat_timestamps?.length || 0,
       beatLabels: Array.isArray(beatLabels) ? beatLabels.length : 0,
@@ -82,8 +83,8 @@ function runTypeScriptChordAnalyzer(linearAnalysis, opts = {}, structuralMap = n
         (e) => e?.event_type !== 'chord_candidate' && e?.event_type !== 'chord',
       );
       const postCleanCount = preservedEvents.length;
-      console.log('[ChordAnalyzer] Pre-Merge Event Count:', preMergeCount);
-      console.log(
+      logger.debug('[ChordAnalyzer] Pre-Merge Event Count:', preMergeCount);
+      logger.debug(
         '[ChordAnalyzer] Post-Clean Event Count (chords removed):',
         postCleanCount,
       );
@@ -108,16 +109,16 @@ function runTypeScriptChordAnalyzer(linearAnalysis, opts = {}, structuralMap = n
         };
       });
       linearAnalysis.events = [...preservedEvents, ...newChordEvents];
-      console.log(
+      logger.pass1(
         `[ChordAnalyzer] Merged ${newChordEvents.length} chord events, preserved ${preservedEvents.length} non-chord events.`,
       );
-      console.log(
+      logger.debug(
         '[ChordAnalyzer] Final Event Count:',
         linearAnalysis.events.length,
       );
     }
   } catch (err) {
-    console.warn('TS ChordAnalyzer invocation failed:', err?.message || err);
+    logger.warn('TS ChordAnalyzer invocation failed:', err?.message || err);
   }
   return linearAnalysis;
 }
@@ -199,11 +200,11 @@ async function analyzeAudio(
           (p) => progressCallback(20 + p * 0.8),
         );
         if (result && result.source === 'python_librosa') {
-          console.log(
+          logger.pass1(
             '✅ SUCCESS: Using Python+Librosa backend. No WASM memory limits!',
           );
         } else if (result) {
-          console.warn('⚠️ WARNING: Python returned but missing source tag.');
+          logger.warn('⚠️ WARNING: Python returned but missing source tag.');
         }
         if (result && (result.linear_analysis || result)) {
           const output = result.linear_analysis || result;
@@ -213,7 +214,7 @@ async function analyzeAudio(
           try {
             runTypeScriptChordAnalyzer(output, harmonyOpts);
           } catch (ex) {
-            console.warn('TS ChordAnalyzer failed:', ex?.message || ex);
+            logger.warn('TS ChordAnalyzer failed:', ex?.message || ex);
           }
           try {
             const sr = output?.metadata?.sample_rate;
@@ -222,7 +223,7 @@ async function analyzeAudio(
               output?.metadata?.hop_length / sr;
             const beatsCount = (output?.beat_grid?.beat_timestamps || [])
               .length;
-            console.log(
+            logger.debug(
               `[Analyzer] Python linear_analysis: sr=${sr} frame_hop_s=${fh} beats=${beatsCount} source=${result.source || 'python'} file=${filePath}`,
             );
           } catch (e) {
@@ -239,15 +240,15 @@ async function analyzeAudio(
           return { fileHash, linear_analysis: output };
         }
       } catch (err) {
-        console.warn('Python analysis failed:', err.message);
+        logger.warn('Python analysis failed:', err.message);
       }
     } else {
-      console.warn(
+      logger.warn(
         '❌ Python not found in system PATH. Falling back to legacy JS (High Crash Risk).',
       );
     }
   } catch (err) {
-    console.error('Error checking Python availability:', err.message);
+    logger.error('Error checking Python availability:', err.message);
   }
 
   // Continue to fallback chain (Essentia.js and simple analyzer)
@@ -256,7 +257,7 @@ async function analyzeAudio(
   try {
     const essentia = await getEssentia();
     if (essentia) {
-      console.log('Using JavaScript Essentia.js for analysis');
+      logger.pass1('Using JavaScript Essentia.js for analysis');
 
       // Prepare audio file
       let audioPathToAnalyze = filePath;
@@ -269,7 +270,7 @@ async function analyzeAudio(
           isTempFile = true;
         }
       } catch (error) {
-        console.warn('Audio conversion failed:', error);
+        logger.warn('Audio conversion failed:', error);
       }
 
       progressCallback(20);
@@ -291,7 +292,7 @@ async function analyzeAudio(
         // Only apply if audio is below 90% of full scale to avoid over-amplification
         if (maxVal < 0.9) {
           const scale = 0.9 / maxVal; // Scale to 90% to leave headroom
-          console.log(
+          logger.debug(
             `Normalizing audio: peak=${maxVal.toFixed(6)}, scale=${scale.toFixed(2)}`,
           );
           for (let i = 0; i < samples.length; i++) {
@@ -323,7 +324,7 @@ async function analyzeAudio(
       try {
         runTypeScriptChordAnalyzer(processed.linear_analysis, harmonyOpts);
       } catch (e) {
-        console.warn(
+        logger.warn(
           'TS ChordAnalyzer on Essentia result failed',
           e?.message || e,
         );
@@ -331,11 +332,11 @@ async function analyzeAudio(
       return processed;
     }
   } catch (error) {
-    console.warn('JavaScript Essentia.js failed:', error.message);
+    logger.warn('JavaScript Essentia.js failed:', error.message);
   }
 
   // Final fallback: Use simple audio analyzer (no Essentia required)
-  console.log(
+  logger.pass1(
     'No Essentia available. Using simple audio analyzer (basic DSP algorithms).',
   );
   progressCallback(20);
@@ -352,14 +353,14 @@ async function analyzeAudio(
 
     try {
       if (path.extname(filePath).toLowerCase() !== '.wav') {
-        console.log('Converting audio file to WAV...');
+        logger.pass1('Converting audio file to WAV...');
         progressCallback(25);
         audioPathToAnalyze = await prepareAudioFile(filePath);
         isTempFile = true;
-        console.log('Audio conversion complete');
+        logger.pass1('Audio conversion complete');
       }
     } catch (error) {
-      console.warn('Audio conversion failed, trying direct WAV load:', error);
+      logger.warn('Audio conversion failed, trying direct WAV load:', error);
       // If conversion fails and it's not WAV, we can't proceed
       if (path.extname(filePath).toLowerCase() !== '.wav') {
         throw new Error(
@@ -368,7 +369,7 @@ async function analyzeAudio(
       }
     }
 
-    console.log('Starting simple audio analysis...');
+    logger.pass1('Starting simple audio analysis...');
     progressCallback(30);
 
     // Use simple analyzer
@@ -378,11 +379,11 @@ async function analyzeAudio(
         // Scale simple analyzer progress to 30-100% range
         const scaledProgress = 30 + progress * 0.7;
         progressCallback(scaledProgress);
-        console.log(`Analysis progress: ${Math.round(scaledProgress)}%`);
+        logger.pass1(`Analysis progress: ${Math.round(scaledProgress)}%`);
       },
     );
 
-    console.log('Simple audio analysis complete');
+    logger.pass1('Simple audio analysis complete');
 
     // Cleanup temp file if created
     if (isTempFile) {
@@ -396,16 +397,16 @@ async function analyzeAudio(
     try {
       runTypeScriptChordAnalyzer(result.linear_analysis, harmonyOpts);
     } catch (e) {
-      console.warn('TS ChordAnalyzer on Simple result failed', e?.message || e);
+      logger.warn('TS ChordAnalyzer on Simple result failed', e?.message || e);
     }
     return {
       fileHash,
       linear_analysis: result.linear_analysis,
     };
   } catch (error) {
-    console.error('Simple audio analyzer failed:', error);
+    logger.error('Simple audio analyzer failed:', error);
     // Last resort: Return placeholder
-    console.warn(
+    logger.warn(
       'All analysis methods failed. Returning placeholder structure.',
     );
     progressCallback(50);
@@ -474,7 +475,7 @@ async function processWithEssentiaJS(
       throw new Error('Invalid audio samples');
     }
 
-    console.log(
+    logger.pass1(
       `Processing ${samples.length} samples (${(samples.length / sampleRate).toFixed(2)}s) for beat tracking`,
     );
 
@@ -496,7 +497,7 @@ async function processWithEssentiaJS(
     }
 
     if (hasInvalid) {
-      console.warn(
+      logger.warn(
         'Audio samples contained invalid values (NaN/Infinity), clamped to 0',
       );
     }
@@ -511,7 +512,7 @@ async function processWithEssentiaJS(
       });
     }
 
-    console.log(`Processing ${chunks.length} chunk(s) for beat tracking`);
+    logger.pass1(`Processing ${chunks.length} chunk(s) for beat tracking`);
 
     // Process each chunk with multiple algorithm fallbacks
     for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
@@ -569,18 +570,18 @@ async function processWithEssentiaJS(
         try {
           // Check if algorithm exists
           if (typeof essentia[algo.name] !== 'function') {
-            console.log(`Algorithm ${algo.name} not available, skipping...`);
+            logger.pass1(`Algorithm ${algo.name} not available, skipping...`);
             continue;
           }
 
           chunkVector = essentia.arrayToVector(chunk.data);
 
           if (!chunkVector) {
-            console.warn(`Failed to create vector for chunk ${chunkIdx + 1}`);
+            logger.warn(`Failed to create vector for chunk ${chunkIdx + 1}`);
             continue;
           }
 
-          console.log(`Trying ${algo.name} for chunk ${chunkIdx + 1}...`);
+          logger.pass1(`Trying ${algo.name} for chunk ${chunkIdx + 1}...`);
           const rhythmData = algo.fn(chunkVector);
 
           // Extract ticks based on algorithm output format
@@ -634,22 +635,22 @@ async function processWithEssentiaJS(
                 const adjustedTicks = ticks.map((tick) => tick + chunk.offset);
                 beatTimestamps.push(...adjustedTicks);
 
-                console.log(
+                logger.pass1(
                   `✓ ${algo.name} succeeded for chunk ${chunkIdx + 1}: Extracted ${ticks.length} beats${tempo ? `, tempo: ${tempo.toFixed(1)} BPM` : ''}`,
                 );
                 chunkSuccess = true;
               } else {
-                console.warn(
+                logger.warn(
                   `Invalid ticks from ${algo.name} for chunk ${chunkIdx + 1}`,
                 );
               }
             } else {
-              console.warn(
+              logger.warn(
                 `No ticks found in ${algo.name} result for chunk ${chunkIdx + 1}`,
               );
             }
           } catch (extractError) {
-            console.warn(
+            logger.warn(
               `Error extracting ticks from ${algo.name} for chunk ${chunkIdx + 1}:`,
               extractError.message,
             );
@@ -673,7 +674,7 @@ async function processWithEssentiaJS(
           const errorMsg = error.message || String(error);
           // Don't log "abort" errors for every algorithm, just note which one failed
           if (!errorMsg.includes('abort') && !errorMsg.includes('emval')) {
-            console.warn(
+            logger.warn(
               `${algo.name} failed for chunk ${chunkIdx + 1}:`,
               errorMsg,
             );
@@ -701,7 +702,7 @@ async function processWithEssentiaJS(
       }
 
       if (!chunkSuccess) {
-        console.warn(
+        logger.warn(
           `All beat tracking algorithms failed for chunk ${chunkIdx + 1}`,
         );
       }
@@ -728,17 +729,17 @@ async function processWithEssentiaJS(
       }
     }
 
-    console.log(`Total beats extracted: ${beatTimestamps.length}`);
+    logger.pass1(`Total beats extracted: ${beatTimestamps.length}`);
 
     if (beatTimestamps.length === 0) {
-      console.warn(
+      logger.warn(
         'No beats extracted from any algorithm. Audio may be too quiet or have no clear rhythm.',
       );
     }
   } catch (error) {
-    console.warn('Beat tracking failed completely:', error.message || error);
+    logger.warn('Beat tracking failed completely:', error.message || error);
     if (error.stack) {
-      console.warn('Stack:', error.stack.split('\n').slice(0, 5).join('\n'));
+      logger.warn('Stack:', error.stack.split('\n').slice(0, 5).join('\n'));
     }
   }
 
@@ -762,12 +763,12 @@ async function processWithEssentiaJS(
       typeof essentia.HPCP === 'function'
     ) {
       algorithmsInitialized = true;
-      console.log('Essentia DSP pipeline initialized for chroma extraction');
+      logger.pass1('Essentia DSP pipeline initialized for chroma extraction');
     } else {
-      console.warn('Essentia DSP algorithms not available, will use fallback');
+      logger.warn('Essentia DSP algorithms not available, will use fallback');
     }
   } catch (initError) {
-    console.warn(
+    logger.warn(
       'Failed to initialize Essentia DSP pipeline:',
       initError.message,
     );
@@ -782,7 +783,7 @@ async function processWithEssentiaJS(
   const totalSamples = samples.length;
   const chromaTotalFrames = Math.ceil((totalSamples - frameSize) / hopSize);
 
-  console.log(
+  logger.pass1(
     `Starting robust chroma extraction: ${chromaTotalFrames} frames, frameSize=${frameSize}, hopSize=${hopSize}`,
   );
 
@@ -832,7 +833,7 @@ async function processWithEssentiaJS(
 
             // Log progress every 1000 frames for visibility
             if (frameIndex % 1000 === 0) {
-              console.log(
+              logger.pass1(
                 `[DSP] Processed ${frameIndex} / ${chromaTotalFrames} frames (${((frameIndex / chromaTotalFrames) * 100).toFixed(1)}%)`,
               );
             }
@@ -986,7 +987,7 @@ async function processWithEssentiaJS(
         } catch (frameError) {
           chromaFailures++;
           if (chromaFailures <= maxChromaFailures) {
-            console.warn(`Frame ${frameIndex} error: ${frameError.message}`);
+            logger.warn(`Frame ${frameIndex} error: ${frameError.message}`);
           }
           chromaFrames.push({ timestamp, chroma: new Array(12).fill(0) });
         } finally {
@@ -1006,7 +1007,7 @@ async function processWithEssentiaJS(
 
           // Log progress every 1000 frames for visibility
           if (frameIndex % 1000 === 0) {
-            console.log(
+            logger.pass1(
               `[DSP] Processed ${frameIndex} / ${chromaTotalFrames} frames (${((frameIndex / chromaTotalFrames) * 100).toFixed(1)}%)`,
             );
           }
@@ -1023,11 +1024,11 @@ async function processWithEssentiaJS(
     }
   } else {
     // Fallback: Use simple analyzer if Essentia DSP pipeline not available
-    console.warn(
+    logger.warn(
       'Essentia DSP pipeline not available, using simple analyzer for chroma',
     );
     try {
-      const simpleAnalyzer = require('./simpleAudioAnalyzer');
+      const simpleAnalyzer = require('./fallbacks/simpleAudioAnalyzer');
       const simpleChromaFrames = await simpleAnalyzer.extractChromaWithProgress(
         samples,
         sampleRate,
@@ -1046,19 +1047,19 @@ async function processWithEssentiaJS(
         if (simpleChromaFrames.semanticFrames) {
           semanticFrameFeatures.push(...simpleChromaFrames.semanticFrames);
         }
-        console.log(
+        logger.pass1(
           `Created ${chromaFrames.length} chroma frames using simple analyzer fallback`,
         );
       }
     } catch (fallbackError) {
-      console.warn(
+      logger.warn(
         'Simple analyzer chroma fallback also failed:',
         fallbackError.message,
       );
     }
   }
 
-  console.log(
+  logger.pass1(
     `Chroma extraction complete: ${chromaFrames.length} frames extracted`,
   );
   progressCallback(85);
@@ -1069,11 +1070,11 @@ async function processWithEssentiaJS(
     beatTimestamps.length > 0 &&
     samples.length > 0
   ) {
-    console.warn(
+    logger.warn(
       'Essentia chroma extraction failed, using simple analyzer fallback',
     );
     try {
-      const simpleAnalyzer = require('./simpleAudioAnalyzer');
+      const simpleAnalyzer = require('./fallbacks/simpleAudioAnalyzer');
       const simpleChromaFrames = await simpleAnalyzer.extractChromaWithProgress(
         samples,
         sampleRate,
@@ -1086,7 +1087,7 @@ async function processWithEssentiaJS(
         throw new Error('Simple analyzer chroma also returned empty');
       }
     } catch (fallbackError) {
-      console.warn('Creating minimal chroma from beats as last resort');
+      logger.warn('Creating minimal chroma from beats as last resort');
       for (const beatTime of beatTimestamps.slice(
         0,
         Math.min(beatTimestamps.length, 500),
@@ -1151,7 +1152,7 @@ async function processWithEssentiaJS(
             detectedMode = scale || 'major';
           }
           keyDetectionSuccess = true;
-          console.log(
+          logger.pass1(
             `✓ ${algo.name} succeeded: ${detectedKey} ${detectedMode}`,
           );
         }
@@ -1190,7 +1191,7 @@ async function processWithEssentiaJS(
         'B',
       ];
       detectedKey = keyNames[maxIdx];
-      console.log(`Fallback key from chroma: ${detectedKey}`);
+      logger.pass1(`Fallback key from chroma: ${detectedKey}`);
     } catch (e) {}
   }
 

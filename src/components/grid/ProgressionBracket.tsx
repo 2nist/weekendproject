@@ -1,5 +1,5 @@
 import React from 'react';
-import { ProgressionGroup } from '../../utils/musicTimeTransform';
+import type { ProgressionGroup } from '../../types/audio';
 
 interface ProgressionBracketProps {
   progression: ProgressionGroup;

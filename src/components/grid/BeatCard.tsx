@@ -8,12 +8,12 @@ const beatCardVariants = cva(
   {
     variants: {
       function: {
-        rest: 'bg-slate-900/50 border-slate-800 text-slate-600',
-        tonic: 'bg-music-tonic border-music-tonic text-white',
-        dominant: 'bg-music-dominant border-music-dominant text-white',
-        subdominant: 'bg-music-subdominant border-music-subdominant text-white',
-        diminished: 'bg-music-diminished border-music-diminished text-white',
-        default: 'bg-slate-800 border-slate-700 text-slate-300',
+        rest: 'bg-card border-border text-muted-foreground',
+        tonic: 'bg-music-tonic border-music-tonic text-card-foreground',
+        dominant: 'bg-music-dominant border-music-dominant text-card-foreground',
+        subdominant: 'bg-music-subdominant border-music-subdominant text-card-foreground',
+        diminished: 'bg-music-diminished border-music-diminished text-card-foreground',
+        default: 'bg-card border-border text-foreground',
       },
       selected: {
         true: 'ring-2 ring-ring ring-offset-2 ring-offset-background z-10',
@@ -141,13 +141,13 @@ export const BeatCard = ({
         isSustain && 'opacity-40 brightness-75 scale-95',
         // Active playback highlight
         isPlaying &&
-          'ring-2 ring-music-kick ring-offset-2 ring-offset-slate-950 shadow-[0_0_20px_hsl(var(--music-kick)/0.6)] scale-105 z-20',
+          'ring-2 ring-music-kick ring-offset-2 ring-offset-background shadow-[0_0_20px_hsl(var(--music-kick)/0.6)] scale-105 z-20',
         // Paint mode cursor
         paintMode && paintChord && 'cursor-crosshair',
         // Paint mode hover effect
-        paintMode && paintChord && isDragging && 'ring-2 ring-indigo-400 ring-offset-1 ring-offset-slate-950',
-        // Conflict warning border (red)
-        showConfidence && hasConflict && 'ring-2 ring-red-500 ring-offset-1 ring-offset-slate-950',
+        paintMode && paintChord && isDragging && 'ring-2 ring-primary ring-offset-1 ring-offset-background',
+        // Conflict warning border (use destructive color)
+        showConfidence && hasConflict && 'ring-2 ring-destructive ring-offset-1 ring-offset-background',
         className,
       )}
       style={{
@@ -180,7 +180,7 @@ export const BeatCard = ({
 
       {/* Roman numeral - only show on attack */}
       {roman && isAttack && (
-        <span className="absolute bottom-1 right-1 text-xs font-bold px-1 py-0.5 bg-black/40 rounded-full backdrop-blur-sm">
+        <span className="absolute bottom-1 right-1 text-xs font-bold px-1 py-0.5 bg-background/60 text-foreground rounded-full backdrop-blur-sm border border-border">
           {roman}
         </span>
       )}

@@ -1,9 +1,5 @@
 import React, { useState } from 'react';
-import {
-  Section,
-  BeatNode,
-  ProgressionGroup,
-} from '../../utils/musicTimeTransform';
+import type { Section, BeatNode, ProgressionGroup } from '../../types/audio';
 import { Measure as MeasureComponent } from './Measure';
 import { BeatCard } from './BeatCard';
 import { ProgressionBracket } from './ProgressionBracket';
@@ -26,15 +22,15 @@ interface SectionContainerProps {
 }
 
 const colorMap: Record<string, string> = {
-  blue: 'border-blue-500 bg-blue-500/10',
-  indigo: 'border-indigo-500 bg-indigo-500/10',
-  green: 'border-green-500 bg-green-500/10',
-  purple: 'border-purple-500 bg-purple-500/10',
-  yellow: 'border-yellow-500 bg-yellow-500/10',
-  red: 'border-red-500 bg-red-500/10',
-  orange: 'border-orange-500 bg-orange-500/10',
-  pink: 'border-pink-500 bg-pink-500/10',
-  gray: 'border-gray-500 bg-gray-500/10',
+  blue: 'border-primary bg-primary/10',
+  indigo: 'border-primary bg-primary/10',
+  green: 'border-music-subdominant bg-music-subdominant/10',
+  purple: 'border-music-diminished bg-music-diminished/10',
+  yellow: 'border-accent bg-accent/10',
+  red: 'border-destructive bg-destructive/10',
+  orange: 'border-accent bg-accent/10',
+  pink: 'border-accent bg-accent/10',
+  gray: 'border-border bg-muted/30',
 };
 
 const sectionVariants = cva(
@@ -42,10 +38,10 @@ const sectionVariants = cva(
   {
     variants: {
       type: {
-        verse: 'border-blue-900/30 bg-blue-950/5',
-        chorus: 'border-purple-900/30 bg-purple-950/5',
-        bridge: 'border-orange-900/30 bg-orange-950/5',
-        default: 'border-slate-800 bg-slate-950/30',
+        verse: 'border-primary/30 bg-primary/5',
+        chorus: 'border-music-diminished/30 bg-music-diminished/5',
+        bridge: 'border-accent/30 bg-accent/5',
+        default: 'border-border bg-muted/30',
       },
     },
     defaultVariants: { type: 'default' },
@@ -78,13 +74,13 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
       <div
         className={cn(
           sectionVariants({ type: sectionType }),
-          'p-4 mb-6 cursor-pointer hover:bg-slate-900/30 transition-colors',
+          'p-4 mb-6 cursor-pointer hover:bg-muted/50 transition-colors',
         )}
         onClick={onClick}
         data-section-id={dataSectionId}
       >
         <div className="mb-4">
-          <h3 className="text-lg font-bold text-white uppercase tracking-wider">
+          <h3 className="text-lg font-bold text-foreground uppercase tracking-wider">
             {label}
           </h3>
         </div>
@@ -145,15 +141,15 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
       {/* Section Header */}
       <button
         type="button"
-        className="flex items-center justify-between mb-4 cursor-pointer hover:bg-gray-800/50 p-2 rounded transition-colors"
+        className="flex items-center justify-between mb-4 cursor-pointer hover:bg-muted/50 p-2 rounded transition-colors"
         onClick={handleHeaderClick}
         aria-label={`Toggle ${section.label}`}
       >
         <div className="flex items-center gap-3">
-          <span className="text-lg font-bold text-white uppercase tracking-wider">
+          <span className="text-lg font-bold text-foreground uppercase tracking-wider">
             {section.label}
           </span>
-          <span className="text-sm text-gray-400">
+          <span className="text-sm text-muted-foreground">
             ({section.measures.length}{' '}
             {section.measures.length === 1 ? 'Bar' : 'Bars'})
           </span>
@@ -162,7 +158,7 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
         <div className="flex items-center gap-2">
           <button
             onClick={handleEdit}
-            className="text-xs text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 transition-colors"
+            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted transition-colors"
             title="Edit section"
             aria-label="Edit section"
             type="button"
@@ -171,14 +167,14 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
           </button>
           <button
             onClick={handleClone}
-            className="text-xs text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 transition-colors"
+            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted transition-colors"
             title="Clone section"
             aria-label="Clone section"
             type="button"
           >
             📋 Clone
           </button>
-          <span className="text-gray-500">{isExpanded ? '▼' : '▶'}</span>
+          <span className="text-muted-foreground">{isExpanded ? '▼' : '▶'}</span>
         </div>
       </button>
 
