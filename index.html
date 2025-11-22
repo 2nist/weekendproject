@@ -4,8 +4,13 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="./vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <!-- CSP relaxed for development: adds 'unsafe-eval' to enable Vite/React dev tooling.
+          IMPORTANT: tighten for production build (remove 'unsafe-eval'). -->
+            <!-- Dev CSP: broaden connect-src for arbitrary localhost/127.0.0.1 ports (Vite HMR, Electron DevTools, MIDI bridges).
+              IMPORTANT: tighten for production (remove unsafe-eval and wildcards). -->
+            <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:* data: blob:; object-src 'none';" />
 
-    <title>Vite + React</title>
+    <title>Structure Architect</title>
   </head>
   <body class="dark">
     <div id="root"></div>

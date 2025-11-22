@@ -51,28 +51,28 @@ export default function ArrangementBlock({ block = {}, className = '', onClick }
 
   return (
     <div
-      className={`p-3 rounded-md border bg-white shadow-sm cursor-pointer hover:shadow-md transition-shadow ${className}`}
+      className={`p-3 rounded-md border border-border bg-card text-card-foreground shadow-sm cursor-pointer hover:shadow-md transition-shadow ${className}`}
       onClick={onClick}
     >
       <div className="flex items-center justify-between">
         <div>
-          <div className="font-medium">
+          <div className="font-medium text-foreground">
             {section_label
               ? `${section_label.charAt(0).toUpperCase() + section_label.slice(1)} ${section_variant || ''}`.trim()
               : name}
           </div>
           {progressionPreview && (
-            <div className="text-xs text-gray-600 mt-1">{progressionPreview}</div>
+            <div className="text-xs text-muted-foreground mt-1">{progressionPreview}</div>
           )}
         </div>
-        <div className="text-xs text-gray-500 text-right">
+        <div className="text-xs text-muted-foreground text-right">
           <div>{length} bars</div>
           {keyDisplay && <div>{keyDisplay}</div>}
           <div>{timeSig}</div>
         </div>
       </div>
 
-      <div className="mt-2 h-2 bg-gray-100 rounded overflow-hidden">
+      <div className="mt-2 h-2 bg-muted rounded overflow-hidden">
         <div
           className={`h-full ${sectionColor || color}`}
           style={{ width: `${widthPct}%` }}
@@ -80,7 +80,7 @@ export default function ArrangementBlock({ block = {}, className = '', onClick }
       </div>
 
       {probability_score !== undefined && (
-        <div className="mt-1 text-xs text-gray-500">
+        <div className="mt-1 text-xs text-muted-foreground">
           Confidence: {Math.round(probability_score * 100)}%
         </div>
       )}

@@ -11,13 +11,18 @@ import { cva } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 interface SectionContainerProps {
-  section: Section;
+  section?: Section;
+  label?: string;
+  type?: string;
+  children?: React.ReactNode;
+  onClick?: () => void;
   progressions?: ProgressionGroup[];
   onBeatClick?: (beat: BeatNode) => void;
   onBeatDoubleClick?: (beat: BeatNode) => void;
   onSectionEdit?: (section: Section) => void;
   onSectionClone?: (section: Section) => void;
   onProgressionEdit?: (progression: ProgressionGroup) => void;
+  'data-section-id'?: string;
 }
 
 const colorMap: Record<string, string> = {
@@ -49,13 +54,48 @@ const sectionVariants = cva(
 
 export const SectionContainer: React.FC<SectionContainerProps> = ({
   section,
+  label,
+  type,
+  children,
+  onClick,
   progressions = [],
   onBeatClick,
   onBeatDoubleClick,
   onSectionEdit,
   onSectionClone,
   onProgressionEdit,
+  'data-section-id': dataSectionId,
 }) => {
+  // Simple wrapper mode (label/type/children)
+  if (label !== undefined || type !== undefined || children !== undefined) {
+    const labelLower = (type || label || '').toLowerCase();
+    let sectionType: 'verse' | 'chorus' | 'bridge' | 'default' = 'default';
+    if (labelLower.includes('chorus')) sectionType = 'chorus';
+    else if (labelLower.includes('bridge')) sectionType = 'bridge';
+    else if (labelLower.includes('verse')) sectionType = 'verse';
+
+    return (
+      <div
+        className={cn(
+          sectionVariants({ type: sectionType }),
+          'p-4 mb-6 cursor-pointer hover:bg-slate-900/30 transition-colors',
+        )}
+        onClick={onClick}
+        data-section-id={dataSectionId}
+      >
+        <div className="mb-4">
+          <h3 className="text-lg font-bold text-white uppercase tracking-wider">
+            {label}
+          </h3>
+        </div>
+        {children}
+      </div>
+    );
+  }
+
+  // Full section mode (section prop)
+  if (!section) return null;
+
   const [isExpanded, setIsExpanded] = useState(true);
   const sectionColor = section.color || 'gray';
   const borderColor = colorMap[sectionColor] || colorMap.gray;
@@ -100,6 +140,7 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
         borderColor,
         'p-4 mb-6',
       )}
+      data-section-id={dataSectionId || section?.id}
     >
       {/* Section Header */}
       <button
@@ -160,6 +201,7 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
               <MeasureComponent
                 key={measure.index}
                 barNumber={measure.index}
+                numerator={measure.timeSignature?.numerator || measure.beats?.length || 4}
                 onEdit={() => console.log('Edit Bar', measure.index)}
               >
                 {measure.beats.map((beat) => {
@@ -186,6 +228,8 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
                       isKick={isKick}
                       isSnare={isSnare}
                       beatIndex={beat.beatIndex}
+                      isAttack={beat.isAttack}
+                      isSustain={beat.isSustain}
                       onEdit={() => onBeatClick?.(beat as any)}
                     />
                   );
@@ -198,3 +242,5 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
     </div>
   );
 };
+
+

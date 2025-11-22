@@ -1,15 +1,19 @@
 import React from 'react';
 import { Settings2 } from 'lucide-react';
 
-export const Measure = ({
-  barNumber,
-  children,
-  onEdit,
-}: {
+export interface MeasureProps {
   barNumber: number;
+  numerator: number; // Time signature numerator (e.g., 4 for 4/4, 3 for 3/4)
   children: React.ReactNode;
   onEdit?: () => void;
-}) => {
+}
+
+export const Measure = ({
+  barNumber,
+  numerator,
+  children,
+  onEdit,
+}: MeasureProps) => {
   return (
     <div className="flex flex-col gap-2 group">
       <div className="flex justify-between items-center px-1">
@@ -29,7 +33,15 @@ export const Measure = ({
         </button>
       </div>
 
-      <div className="flex gap-1 p-1 bg-slate-950/50 rounded-2xl border border-slate-800/50 group-hover:border-slate-700 transition-colors">
+      {/* CSS Grid layout for strict rhythmic alignment */}
+      <div
+        className="p-1 bg-slate-900/80 rounded-2xl border border-slate-800/50 group-hover:border-slate-700 transition-colors"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${numerator}, minmax(3.5rem, 1fr))`,
+          gap: '0.25rem', // gap-1 equivalent
+        }}
+      >
         {children}
       </div>
     </div>

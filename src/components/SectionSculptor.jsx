@@ -1,32 +1,128 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 /**
  * Section Sculptor panel (formerly ProbabilityDashboard sliders)
  * Allows fine-grained adjustments to a selected section
  */
-export default function SectionSculptor({ section, onUpdate }) {
+export default function SectionSculptor({ section, onUpdate, fileHash }) {
   const [harmonicComplexity, setHarmonicComplexity] = useState(50);
   const [rhythmicDensity, setRhythmicDensity] = useState(50);
   const [grooveSwing, setGrooveSwing] = useState(0);
   const [tension, setTension] = useState(50);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const debounceTimerRef = useRef(null);
+  const currentParamsRef = useRef({});
 
   useEffect(() => {
     if (section) {
-      // Could hydrate sliders from section metadata in future
+      // Hydrate sliders from section metadata if available
+      const harmonicDNA = section.harmonic_dna || {};
+      const rhythmicDNA = section.rhythmic_dna || {};
+      
+      if (harmonicDNA.complexity !== undefined) {
+        setHarmonicComplexity(harmonicDNA.complexity);
+      }
+      if (rhythmicDNA.density !== undefined) {
+        setRhythmicDensity(rhythmicDNA.density);
+      }
+      if (rhythmicDNA.groove_swing !== undefined) {
+        setGrooveSwing(rhythmicDNA.groove_swing);
+      }
+      if (harmonicDNA.tension !== undefined) {
+        setTension(harmonicDNA.tension);
+      }
     }
   }, [section]);
 
-  const emit = (payload) => {
-    if (onUpdate) {
-      onUpdate(payload);
+  // Apply sculpting parameters in real-time
+  const applySculpting = useCallback(async (params, commit = false) => {
+    if (!section || !fileHash) return;
+    
+    // Get current fileHash if not provided
+    const hash = fileHash || 
+                 window.__lastAnalysisHash || 
+                 globalThis.__currentFileHash || 
+                 null;
+    
+    if (!hash) {
+      console.warn('[SectionSculptor] No fileHash available');
+      return;
     }
-  };
 
+    setIsProcessing(true);
+    try {
+      // Merge with previous parameters
+      const mergedParams = { ...currentParamsRef.current, ...params };
+      currentParamsRef.current = mergedParams;
+
+      if (window.electronAPI && window.electronAPI.invoke) {
+        const result = await window.electronAPI.invoke('ANALYSIS:SCULPT_SECTION', {
+          fileHash: hash,
+          sectionId: section.id || section.section_id,
+          parameters: mergedParams,
+          commit,
+        });
+
+        if (result?.success) {
+          console.log('[SectionSculptor] Parameters applied successfully');
+          if (onUpdate) {
+            onUpdate({ ...params, applied: true });
+          }
+        } else {
+          console.error('[SectionSculptor] Failed to apply:', result?.error);
+        }
+      } else {
+        // Fallback: just call onUpdate
+        if (onUpdate) {
+          onUpdate(params);
+        }
+      }
+    } catch (err) {
+      console.error('[SectionSculptor] Error applying parameters:', err);
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [section, fileHash, onUpdate]);
+
+  // Debounced real-time updates
   const handleRangeChange = (setter, descriptor) => (event) => {
     const value = parseInt(event.target.value, 10);
     setter(value);
-    emit(descriptor(value));
+    
+    const paramUpdate = descriptor(value);
+    
+    // Clear previous debounce timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    
+    // Debounce: apply after 300ms of no changes
+    debounceTimerRef.current = setTimeout(() => {
+      applySculpting(paramUpdate, false); // Preview mode
+    }, 300);
+    
+    // Also call original onUpdate for immediate UI feedback
+    if (onUpdate) {
+      onUpdate(paramUpdate);
+    }
   };
+
+  const handleCommit = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    applySculpting(currentParamsRef.current, true); // Commit mode
+  }, [applySculpting]);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
 
   if (!section) {
     return (
@@ -98,10 +194,27 @@ export default function SectionSculptor({ section, onUpdate }) {
           borderRadius: '8px',
         }}
       >
-        <div style={{ fontSize: '12px', color: '#666' }}>
+        <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px' }}>
           <strong>Note:</strong> These sliders modify the section based on genre profiles and theory
-          rules. Changes are applied instantly to the harmonic and rhythmic DNA.
+          rules. Changes are applied in real-time (preview mode).
         </div>
+        <button
+          onClick={handleCommit}
+          disabled={isProcessing}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: isProcessing ? '#ccc' : '#3b82f6',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: isProcessing ? 'not-allowed' : 'pointer',
+            fontSize: '12px',
+            fontWeight: 'bold',
+            width: '100%',
+          }}
+        >
+          {isProcessing ? 'Applying...' : 'Commit Changes'}
+        </button>
       </div>
     </div>
   );
@@ -151,4 +264,3 @@ function getTensionDescription(value) {
   if (value <= 85) return 'Tritone substitutions';
   return 'Diminished passing chords, altered dominants';
 }
-

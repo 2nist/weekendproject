@@ -47,7 +47,7 @@ console.log(
 );
 
 // Helper: run the TypeScript ChordAnalyzer on a linear_analysis object
-function runTypeScriptChordAnalyzer(linearAnalysis, opts = {}) {
+function runTypeScriptChordAnalyzer(linearAnalysis, opts = {}, structuralMap = null) {
   if (!ChordAnalyzer || !linearAnalysis) return linearAnalysis;
   try {
     const analyzerInstance = new ChordAnalyzer({ include7ths: true });
@@ -61,6 +61,9 @@ function runTypeScriptChordAnalyzer(linearAnalysis, opts = {}) {
       diatonicBonus: 0.1,
       rootPeakBias: 0.1,
       globalKey: keyHint,
+      structuralMap: structuralMap, // Pass structural map for section-based key bias
+      windowShift: opts.windowShift || 0, // Window shift from UI (-0.05 to +0.05)
+      bassWeight: opts.bassWeight || 0, // Bass weight for inversion detection (0-1)
     };
     // Merge provided opts with defaults
     const mergedOpts = { ...detectOpts, ...(opts || {}) };
@@ -126,7 +129,9 @@ function recalcChords(linearAnalysis, opts = {}) {
     return { success: false, error: 'Missing linear analysis' };
   try {
     const copy = JSON.parse(JSON.stringify(linearAnalysis));
-    runTypeScriptChordAnalyzer(copy, opts);
+    // Extract structuralMap from opts if provided
+    const structuralMap = opts.structuralMap || null;
+    runTypeScriptChordAnalyzer(copy, opts, structuralMap);
     return { success: true, events: copy.events };
   } catch (err) {
     return { success: false, error: err?.message || String(err) };
@@ -174,6 +179,7 @@ async function analyzeAudio(
   filePath,
   progressCallback = () => {},
   metadataOverrides = {},
+  harmonyOptions = {},
 ) {
   // Prefer the Python sidecar using librosa for robust analysis.
   progressCallback(5);
@@ -202,8 +208,10 @@ async function analyzeAudio(
         if (result && (result.linear_analysis || result)) {
           const output = result.linear_analysis || result;
           // Run TypeScript ChordAnalyzer to generate beat-sync chord labels
+          // Use harmony options if provided (from Analysis Lab)
+          const harmonyOpts = harmonyOptions && Object.keys(harmonyOptions).length > 0 ? harmonyOptions : {};
           try {
-            runTypeScriptChordAnalyzer(output);
+            runTypeScriptChordAnalyzer(output, harmonyOpts);
           } catch (ex) {
             console.warn('TS ChordAnalyzer failed:', ex?.message || ex);
           }
@@ -222,6 +230,11 @@ async function analyzeAudio(
           }
           if (metadataOverrides)
             applyMetadataOverrides(output, metadataOverrides);
+          // Store harmony options in metadataOverrides for chord analyzer
+          if (harmonyOptions && Object.keys(harmonyOptions).length > 0) {
+            output.metadata = output.metadata || {};
+            output.metadata.harmonyOptions = harmonyOptions;
+          }
           progressCallback(100);
           return { fileHash, linear_analysis: output };
         }
@@ -305,8 +318,10 @@ async function analyzeAudio(
       );
       applyMetadataOverrides(processed.linear_analysis, metadataOverrides);
       // Re-run TS ChordAnalyzer on Essentia.js results (overwrite raw events)
+      // Use harmony options if provided (from Analysis Lab)
+      const harmonyOpts = harmonyOptions && Object.keys(harmonyOptions).length > 0 ? harmonyOptions : {};
       try {
-        runTypeScriptChordAnalyzer(processed.linear_analysis);
+        runTypeScriptChordAnalyzer(processed.linear_analysis, harmonyOpts);
       } catch (e) {
         console.warn(
           'TS ChordAnalyzer on Essentia result failed',
@@ -376,8 +391,10 @@ async function analyzeAudio(
 
     progressCallback(100);
     applyMetadataOverrides(result.linear_analysis, metadataOverrides);
+    // Use harmony options if provided (from Analysis Lab)
+    const harmonyOpts = harmonyOptions && Object.keys(harmonyOptions).length > 0 ? harmonyOptions : {};
     try {
-      runTypeScriptChordAnalyzer(result.linear_analysis);
+      runTypeScriptChordAnalyzer(result.linear_analysis, harmonyOpts);
     } catch (e) {
       console.warn('TS ChordAnalyzer on Simple result failed', e?.message || e);
     }

@@ -190,6 +190,20 @@ function getSettings() {
   return settings;
 }
 
+function setSetting(key, value) {
+  try {
+    db.run('INSERT OR REPLACE INTO Settings (key, value) VALUES (?, ?)', [key, String(value)]);
+    // Save database to disk
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    fs.writeFileSync(dbPath, buffer);
+    return { success: true };
+  } catch (error) {
+    console.error('Error setting setting:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 function getDb() {
   return db;
 }
@@ -439,6 +453,29 @@ function getAnalysisById(analysisId) {
   };
 }
 
+function getMostRecentAnalysis() {
+  console.log('DB: Getting most recent analysis');
+  const stmt = db.prepare('SELECT * FROM AudioAnalysis ORDER BY created_at DESC LIMIT 1');
+  let row = null;
+  if (stmt.step()) {
+    row = stmt.getAsObject();
+  }
+  stmt.free();
+  if (!row) return null;
+  return {
+    id: row.id,
+    file_path: row.file_path,
+    file_hash: row.file_hash,
+    metadata: JSON.parse(row.metadata_json || '{}'),
+    linear_analysis: JSON.parse(row.linear_analysis_json || '{}'),
+    structural_map: JSON.parse(row.structural_map_json || '{}'),
+    arrangement_flow: JSON.parse(row.arrangement_flow_json || '{}'),
+    harmonic_context: JSON.parse(row.harmonic_context_json || '{}'),
+    polyrhythmic_layers: JSON.parse(row.polyrhythmic_layers_json || '[]'),
+    created_at: row.created_at,
+  };
+}
+
 function getAnalysisSections(analysisId) {
   const stmt = db.prepare(
     'SELECT * FROM AnalysisSections WHERE analysis_id = ?',
@@ -668,9 +705,11 @@ module.exports = {
   init,
   populateInitialData,
   getSettings,
+  setSetting,
   getDb,
   saveAnalysis,
   getAnalysis,
+  getMostRecentAnalysis,
   getAnalysisSections,
   saveUserSong,
   saveProject,

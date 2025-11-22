@@ -47,11 +47,11 @@ export default function ContextualBlockStatus({
   }
 
   return (
-    <div className={`bg-white border rounded-md p-3 ${className}`}>
-      <h4 className="text-sm font-semibold mb-2">Contextual Block Status</h4>
+    <div className={`bg-card border border-border rounded-md p-3 text-card-foreground ${className}`}>
+      <h4 className="text-sm font-semibold mb-2 text-foreground">Contextual Block Status</h4>
 
       {selected ? (
-        <div className="text-sm">
+        <div className="text-sm text-card-foreground">
           <div className="mb-1">
             <strong>ID:</strong> {selected.id}
           </div>
@@ -63,12 +63,12 @@ export default function ContextualBlockStatus({
           </div>
         </div>
       ) : (
-        <div className="text-sm text-gray-500">No block selected</div>
+        <div className="text-sm text-muted-foreground">No block selected</div>
       )}
 
-      <hr className="my-3" />
+      <hr className="my-3 border-border" />
 
-      <div className="text-sm text-gray-700 space-y-1">
+      <div className="text-sm text-card-foreground space-y-1">
         <div>
           <strong>BPM:</strong> {status.bpm ?? '—'}
         </div>

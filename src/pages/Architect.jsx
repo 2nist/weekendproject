@@ -7,6 +7,7 @@ import SectionDetailPanel from '../components/SectionDetailPanel';
 import SectionSculptor from '../components/SectionSculptor';
 import SandboxMode from '../components/SandboxMode';
 import { HarmonicGrid } from '../components/grid/HarmonicGrid';
+import NoveltyCurveVisualizer from '../components/NoveltyCurveVisualizer';
 
 export default function Architect() {
   const { blocks: remoteBlocks, setBlocks } = useAppIPC();
@@ -24,10 +25,19 @@ export default function Architect() {
   const rows = 3;
   const cellCount = cols * rows;
 
+  // Move useRef to top level - cannot call hooks inside useMemo
+  const prevBlocksRef = React.useRef(remoteBlocks);
+
   const blocks = React.useMemo(() => {
-    console.log('Architect: remoteBlocks changed:', remoteBlocks);
+    // Only log when blocks actually change (not on every render)
+    const blocksChanged = JSON.stringify(prevBlocksRef.current) !== JSON.stringify(remoteBlocks);
+    
+    if (blocksChanged) {
+      console.log('Architect: remoteBlocks changed:', remoteBlocks?.length || 0);
+      prevBlocksRef.current = remoteBlocks;
+    }
+    
     if (remoteBlocks && remoteBlocks.length) {
-      console.log(`Architect: Filling ${remoteBlocks.length} blocks into ${cellCount} cells`);
       // fill into cells, leave empty slots
       const arr = new Array(cellCount).fill(null);
       for (let i = 0; i < Math.min(remoteBlocks.length, cellCount); i++) {
@@ -36,7 +46,6 @@ export default function Architect() {
       return arr;
     }
 
-    console.log('Architect: No remote blocks, using placeholders');
     // fallback placeholder content
     return new Array(cellCount).fill(null).map((_, i) => ({
       id: `placeholder-${i + 1}`,
@@ -214,9 +223,9 @@ export default function Architect() {
         <aside style={{ width: '320px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px' }}>
           <SectionSculptor
             section={selectedSection}
+            fileHash={window.__lastAnalysisHash || globalThis.__currentFileHash || null}
             onUpdate={(update) => {
               console.log('Section update:', update);
-              // TODO: Apply updates to section
             }}
           />
         </aside>
@@ -391,6 +400,9 @@ export default function Architect() {
       >
         <SeamlessLoader />
         <ContextualBlockStatus selectedId={selectedId} />
+        {structuralMap?.debug?.noveltyCurve && (
+          <NoveltyCurveVisualizer structuralMap={structuralMap} />
+        )}
       </aside>
     </div>
   );

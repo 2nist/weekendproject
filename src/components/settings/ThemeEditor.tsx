@@ -7,6 +7,15 @@ import { RefreshCcw, Save } from 'lucide-react';
 // Token definitions
 const THEME_TOKENS = [
   {
+    section: 'Text & UI',
+    items: [
+      { label: 'Primary Text', cssVar: '--foreground', default: '#f8fafc' },
+      { label: 'Secondary Text', cssVar: '--muted-foreground', default: '#94a3b8' },
+      { label: 'Background', cssVar: '--background', default: '#0f172a' },
+      { label: 'Card Background', cssVar: '--card', default: '#1e293b' },
+    ],
+  },
+  {
     section: 'Rhythm',
     items: [
       { label: 'Kick Drum', cssVar: '--music-kick', default: '#06b6d4' },

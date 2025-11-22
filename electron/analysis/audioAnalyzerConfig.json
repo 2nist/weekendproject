@@ -1,0 +1,11 @@
+{
+  "chroma_smoothing_window": 2,
+  "bass_weight": 2.3,
+  "rhythm_method": "degara",
+  "onset_sensitivity": 0.6,
+  "spectral_whitening": 0.2,
+  "novelty_threshold": 0.2,
+  "rms_threshold_adaptive": true,
+  "chord_duration_min": 0.8,
+  "key_detection_major_bias": 0.1
+}

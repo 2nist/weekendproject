@@ -480,6 +480,7 @@ export default function SandboxMode({
 
           <SectionSculptor
             section={selectedBlock}
+            fileHash={window.__lastAnalysisHash || globalThis.__currentFileHash || null}
             onUpdate={(update) => {
               handleBlockUpdate(selectedBlock.id, update);
             }}

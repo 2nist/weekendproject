@@ -7,7 +7,7 @@ import React from 'react';
 export default function SectionDetailPanel({ section, onClose }) {
   if (!section) {
     return (
-      <div style={{ padding: '20px', color: '#666' }}>
+      <div className="p-5 text-muted-foreground">
         Select a section to view details
       </div>
     );
@@ -28,20 +28,15 @@ export default function SectionDetailPanel({ section, onClose }) {
   };
 
   return (
-    <div style={{ padding: '20px', maxHeight: '80vh', overflowY: 'auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-        <h2>
+    <div className="p-5 max-h-[80vh] overflow-y-auto text-foreground bg-background">
+      <div className="flex justify-between items-center mb-5">
+        <h2 className="text-xl font-bold text-foreground">
           {section_label?.charAt(0).toUpperCase() + section_label?.slice(1)} - {section_id}
         </h2>
         {onClose && (
           <button
             onClick={onClose}
-            style={{
-              padding: '5px 10px',
-              border: '1px solid #ddd',
-              borderRadius: '5px',
-              cursor: 'pointer',
-            }}
+            className="px-3 py-1 border border-border rounded-md cursor-pointer bg-card text-card-foreground hover:bg-accent hover:text-accent-foreground"
           >
             Close
           </button>
@@ -49,8 +44,8 @@ export default function SectionDetailPanel({ section, onClose }) {
       </div>
 
       {/* Harmonic Progression */}
-      <div style={{ marginBottom: '30px' }}>
-        <h3 style={{ marginBottom: '15px', borderBottom: '2px solid #e5e7eb', paddingBottom: '5px' }}>
+      <div className="mb-8">
+        <h3 className="mb-4 pb-1 border-b-2 border-border text-foreground font-semibold">
           Harmonic Progression
         </h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px' }}>
@@ -76,32 +71,21 @@ export default function SectionDetailPanel({ section, onClose }) {
                   {chord.quality}
                   {chord.extensions?.length > 0 && `(${chord.extensions.join(',')})`}
                 </div>
-                <div style={{ fontSize: '14px', color: '#666' }}>
+                <div className="text-sm text-muted-foreground">
                   {functional?.roman_numeral}
                 </div>
-                <div style={{ fontSize: '12px', color: '#999', marginTop: '5px' }}>
+                <div className="text-xs text-muted-foreground mt-1">
                   {functional?.function}
                 </div>
                 {justification?.correction_applied && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: '5px',
-                      right: '5px',
-                      fontSize: '10px',
-                      backgroundColor: '#fbbf24',
-                      color: 'white',
-                      padding: '2px 5px',
-                      borderRadius: '3px',
-                    }}
-                  >
+                  <div className="absolute top-1 right-1 text-[10px] bg-yellow-600 text-white px-1.5 py-0.5 rounded">
                     Corrected
                   </div>
                 )}
-                <div style={{ fontSize: '11px', marginTop: '8px', color: '#666' }}>
+                <div className="text-xs text-muted-foreground mt-2">
                   {chordItem.duration_beats} beats
                 </div>
-                <div style={{ fontSize: '11px', color: '#666' }}>
+                <div className="text-xs text-muted-foreground">
                   Confidence: {Math.round(chordItem.probability_score * 100)}%
                 </div>
               </div>
@@ -111,20 +95,20 @@ export default function SectionDetailPanel({ section, onClose }) {
 
         {/* Theory Justifications */}
         {harmonic_dna?.progression?.some((c) => c.theory_justification?.correction_applied) && (
-          <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f3f4f6', borderRadius: '8px' }}>
-            <h4 style={{ marginBottom: '10px' }}>Theory Corrections</h4>
+          <div className="mt-5 p-4 bg-muted border border-border rounded-lg">
+            <h4 className="mb-3 text-foreground font-semibold">Theory Corrections</h4>
             {harmonic_dna.progression
               .filter((c) => c.theory_justification?.correction_applied)
               .map((chordItem, idx) => (
-                <div key={idx} style={{ marginBottom: '10px', fontSize: '13px' }}>
-                  <strong>
+                <div key={idx} className="mb-3 text-sm text-card-foreground">
+                  <strong className="text-foreground">
                     {chordItem.theory_justification.original_chord} →{' '}
                     {chordItem.theory_justification.corrected_chord}
                   </strong>
-                  <div style={{ color: '#666', marginTop: '3px' }}>
+                  <div className="text-muted-foreground mt-1">
                     {chordItem.theory_justification.reasoning}
                   </div>
-                  <div style={{ fontSize: '11px', color: '#999', marginTop: '3px' }}>
+                  <div className="text-xs text-muted-foreground mt-1">
                     Rules: {chordItem.theory_justification.rules_applied.join(', ')}
                   </div>
                 </div>
@@ -134,8 +118,8 @@ export default function SectionDetailPanel({ section, onClose }) {
       </div>
 
       {/* Rhythmic DNA */}
-      <div style={{ marginBottom: '30px' }}>
-        <h3 style={{ marginBottom: '15px', borderBottom: '2px solid #e5e7eb', paddingBottom: '5px' }}>
+      <div className="mb-8">
+        <h3 className="mb-4 pb-1 border-b-2 border-border text-foreground font-semibold">
           Rhythmic DNA
         </h3>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
@@ -183,8 +167,8 @@ export default function SectionDetailPanel({ section, onClose }) {
       </div>
 
       {/* Key and Mode */}
-      <div style={{ marginBottom: '20px' }}>
-        <h3 style={{ marginBottom: '10px', borderBottom: '2px solid #e5e7eb', paddingBottom: '5px' }}>
+      <div className="mb-5">
+        <h3 className="mb-3 pb-1 border-b-2 border-border text-foreground font-semibold">
           Harmonic Context
         </h3>
         <div>
@@ -209,8 +193,8 @@ export default function SectionDetailPanel({ section, onClose }) {
       </div>
 
       {section.semantic_signature && (
-        <div style={{ marginBottom: '20px' }}>
-          <h3 style={{ marginBottom: '10px', borderBottom: '2px solid #e5e7eb', paddingBottom: '5px' }}>
+        <div className="mb-5">
+          <h3 className="mb-3 pb-1 border-b-2 border-border text-foreground font-semibold">
             Semantic Signature
           </h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
@@ -222,12 +206,12 @@ export default function SectionDetailPanel({ section, onClose }) {
             <SignatureStat label="Duration" value={`${section.semantic_signature.duration_seconds?.toFixed(1) || 0}s`} />
           </div>
           {section.semantic_signature.semantic_label && (
-            <div style={{ marginTop: '15px', padding: '10px', backgroundColor: '#f3f4f6', borderRadius: '6px' }}>
-              <div style={{ fontWeight: 'bold' }}>
+            <div className="mt-4 p-3 bg-muted border border-border rounded-md">
+              <div className="font-bold text-foreground">
                 Semantic Label: {section.semantic_signature.semantic_label.label}{' '}
                 ({Math.round((section.semantic_signature.semantic_label.confidence || 0) * 100)}%)
               </div>
-              <div style={{ fontSize: '12px', color: '#555', marginTop: '4px' }}>
+              <div className="text-xs text-muted-foreground mt-1">
                 {section.semantic_signature.semantic_label.reason}
               </div>
             </div>
@@ -240,9 +224,9 @@ export default function SectionDetailPanel({ section, onClose }) {
 
 function SignatureStat({ label, value }) {
   return (
-    <div style={{ padding: '10px', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
-      <div style={{ fontSize: '12px', color: '#6b7280' }}>{label}</div>
-      <div style={{ fontWeight: 'bold', fontSize: '16px', marginTop: '4px' }}>{value ?? '—'}</div>
+    <div className="p-3 border border-border rounded-md bg-card">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="font-bold text-base mt-1 text-card-foreground">{value ?? '—'}</div>
     </div>
   );
 }

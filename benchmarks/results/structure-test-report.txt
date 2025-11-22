@@ -1,0 +1,126 @@
+
+================================================================================
+STRUCTURE STABILITY TEST REPORT
+================================================================================
+Tolerance: ±3 seconds
+
+--------------------------------------------------------------------------------
+SONG                           | F-SCORE  | FRAG. INDEX  | STATUS                   
+--------------------------------------------------------------------------------
+Come Together                  | 0.31     | 0.18         | ❌ FAIL (Under-segmented) 
+Eleanor Rigby                  | 0.33     | 0.20         | ❌ FAIL (Under-segmented) 
+Maxwell's Silver Hammer        | 0.27     | 0.15         | ❌ FAIL (Under-segmented) 
+Ob-La-Di, Ob-La-Da             | 0.14     | 0.08         | ❌ FAIL (Under-segmented) 
+Let It Be                      | 0.13     | 0.07         | ❌ FAIL (Under-segmented) 
+Helter Skelter                 | 0.31     | 0.18         | ❌ FAIL (Under-segmented) 
+A Day In The Life              | 0.13     | 0.15         | ❌ FAIL (Under-segmented) 
+--------------------------------------------------------------------------------
+
+Summary:
+  Average F-Score: 0.232
+  Average Fragmentation Index: 0.15
+  Pass: 0 | Warn: 0 | Fail: 7
+
+================================================================================
+DETAILED BREAKDOWN (Failed/Over-segmented Songs)
+================================================================================
+
+Come Together:
+  F-Score: 0.308 (Precision: 1.000, Recall: 0.182)
+  Boundaries: 2 hits, 10 misses, 0 ghosts
+  Fragmentation: 2 detected / 11 expected = 0.18
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 2 vs 11 expected)
+
+Eleanor Rigby:
+  F-Score: 0.333 (Precision: 1.000, Recall: 0.200)
+  Boundaries: 2 hits, 9 misses, 0 ghosts
+  Fragmentation: 2 detected / 10 expected = 0.20
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 2 vs 10 expected)
+
+Maxwell's Silver Hammer:
+  F-Score: 0.267 (Precision: 1.000, Recall: 0.154)
+  Boundaries: 2 hits, 12 misses, 0 ghosts
+  Fragmentation: 2 detected / 13 expected = 0.15
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 2 vs 13 expected)
+
+Ob-La-Di, Ob-La-Da:
+  F-Score: 0.143 (Precision: 1.000, Recall: 0.077)
+  Boundaries: 1 hits, 12 misses, 0 ghosts
+  Fragmentation: 1 detected / 13 expected = 0.08
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 1 vs 13 expected)
+
+Let It Be:
+  F-Score: 0.133 (Precision: 1.000, Recall: 0.071)
+  Boundaries: 1 hits, 13 misses, 0 ghosts
+  Fragmentation: 1 detected / 14 expected = 0.07
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 1 vs 14 expected)
+
+Helter Skelter:
+  F-Score: 0.308 (Precision: 1.000, Recall: 0.182)
+  Boundaries: 2 hits, 10 misses, 0 ghosts
+  Fragmentation: 2 detected / 11 expected = 0.18
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 2 vs 11 expected)
+
+A Day In The Life:
+  F-Score: 0.133 (Precision: 0.500, Recall: 0.077)
+  Boundaries: 1 hits, 12 misses, 1 ghosts
+  Fragmentation: 2 detected / 13 expected = 0.15
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 2 vs 13 expected)
+
+================================================================================
+REFINEMENT SUGGESTIONS
+================================================================================
+
+Come Together:
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 2 vs 11 expected)
+
+Eleanor Rigby:
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 2 vs 10 expected)
+
+Maxwell's Silver Hammer:
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 2 vs 13 expected)
+
+Ob-La-Di, Ob-La-Da:
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 1 vs 13 expected)
+
+Let It Be:
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 1 vs 14 expected)
+
+Helter Skelter:
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 2 vs 11 expected)
+
+A Day In The Life:
+  Suggestion: Enable Timbre Tracking (MFCCs) in Pass 2 - sections may be too similar (detected 2 vs 13 expected)
+
+================================================================================
+VISUAL BOUNDARY COMPARISON
+================================================================================
+(Top: Ground Truth, Bottom: Detected)
+
+Come Together:
+  GT: ████████████████████████████████████████████████████████████ (11 sections)
+  DT: ███████████ (2 sections)
+
+Eleanor Rigby:
+  GT: ████████████████████████████████████████████████████████████ (10 sections)
+  DT: ████████████ (2 sections)
+
+Maxwell's Silver Hammer:
+  GT: ████████████████████████████████████████████████████████████ (13 sections)
+  DT: █████████ (2 sections)
+
+Ob-La-Di, Ob-La-Da:
+  GT: ████████████████████████████████████████████████████████████ (13 sections)
+  DT: █████ (1 sections)
+
+Let It Be:
+  GT: ████████████████████████████████████████████████████████████ (14 sections)
+  DT: ████ (1 sections)
+
+Helter Skelter:
+  GT: ████████████████████████████████████████████████████████████ (11 sections)
+  DT: ███████████ (2 sections)
+
+A Day In The Life:
+  GT: ████████████████████████████████████████████████████████████ (13 sections)
+  DT: █████████ (2 sections)

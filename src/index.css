@@ -93,14 +93,37 @@
 }
 
 @layer base {
+  :root {
+    --font-sans: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+    --font-serif: Georgia, 'Times New Roman', Times, serif;
+    --font-display: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  
   * {
     @apply border-border;
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
     font-feature-settings:
       'rlig' 1,
       'calt' 1;
+  }
+  code, pre, .font-mono {
+    font-family: var(--font-mono);
+  }
+  .font-serif {
+    font-family: var(--font-serif);
+  }
+  .font-display, h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+  }
+  select {
+    @apply bg-popover text-popover-foreground;
+  }
+  select option {
+    @apply bg-popover text-popover-foreground;
   }
 }
 

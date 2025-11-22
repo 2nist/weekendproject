@@ -1,4 +1,5 @@
 import React from 'react';
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import Architect from './pages/ArchitectView';
 import ArchitectNew from './pages/Architect';
 import Connections from './pages/Connections';
@@ -10,12 +11,25 @@ import ThemeEditor from './components/settings/ThemeEditor';
 import SettingsView from './views/SettingsView';
 import SandboxView from './views/SandboxView';
 import AnalysisTuner from './components/tools/AnalysisTuner';
+import { BlocksProvider } from './contexts/BlocksContext';
 
 function App() {
-  const [activeTab, setActiveTab] = React.useState('Architect');
+  const navigate = useNavigate();
+  const location = useLocation();
   const [sandboxContext, setSandboxContext] = React.useState(null);
   const [error, setError] = React.useState(null);
   const [showAnalysisTuner, setShowAnalysisTuner] = React.useState(false);
+  
+  // Memoize navigate function to prevent unnecessary re-renders
+  const stableNavigate = React.useCallback((path) => {
+    navigate(path);
+  }, [navigate]);
+  
+  // Helper to check if a route is active (memoized)
+  const isActiveRoute = React.useCallback((path) => {
+    if (path === '/') return location.pathname === '/' || location.pathname === '/architect';
+    return location.pathname === path;
+  }, [location.pathname]);
 
   React.useEffect(() => {
     // Catch any unhandled errors
@@ -31,28 +45,57 @@ function App() {
   React.useEffect(() => {
     const onOpenSandbox = async (e) => {
       const detail = e?.detail || {};
+      console.log('[App] OPEN_SANDBOX event received:', detail);
+      
       // If analysisId present, fetch analysis by id
-      if (detail.analysisId && !detail.fileHash) {
+      if (detail.analysisId) {
         try {
-          const res = await window.ipc.invoke(
-            'ANALYSIS:GET_BY_ID',
-            detail.analysisId,
-          );
-          if (res?.success && res.analysis) {
-            setSandboxContext(res.analysis);
-            setActiveTab('Sandbox');
-            return;
+          const ipcAPI = window?.electronAPI?.invoke || window?.ipc?.invoke;
+          if (ipcAPI) {
+            const res = await ipcAPI('ANALYSIS:GET_BY_ID', detail.analysisId);
+            if (res?.success && res.analysis) {
+              console.log('[App] Loaded analysis by ID:', res.analysis);
+              setSandboxContext(res.analysis);
+              navigate('/sandbox');
+              return;
+            }
           }
         } catch (err) {
-          console.error('Failed to fetch analysis for sandbox', err);
+          console.error('[App] Failed to fetch analysis by ID for sandbox:', err);
         }
       }
+      
+      // If fileHash present but no full analysis, try to fetch it
+      if (detail.fileHash && !detail.linear_analysis) {
+        try {
+          const ipcAPI = window?.electronAPI?.invoke || window?.ipc?.invoke;
+          if (ipcAPI) {
+            const res = await ipcAPI('ANALYSIS:GET_RESULT', detail.fileHash);
+            if (res?.success && res.analysis) {
+              console.log('[App] Loaded analysis by fileHash:', res.analysis);
+              setSandboxContext(res.analysis);
+              navigate('/sandbox');
+              return;
+            } else if (res?.analysis) {
+              console.log('[App] Loaded analysis by fileHash (no success flag):', res.analysis);
+              setSandboxContext(res.analysis);
+              navigate('/sandbox');
+              return;
+            }
+          }
+        } catch (err) {
+          console.error('[App] Failed to fetch analysis by fileHash for sandbox:', err);
+        }
+      }
+      
+      // Fallback: set context with whatever detail we have (useAnalysisSandbox will try to fetch)
+      console.log('[App] Setting sandbox context with detail (will fetch in hook):', detail);
       setSandboxContext(detail || null);
-      setActiveTab('Sandbox');
+      navigate('/sandbox');
     };
     window.addEventListener('OPEN_SANDBOX', onOpenSandbox);
     return () => window.removeEventListener('OPEN_SANDBOX', onOpenSandbox);
-  }, []);
+  }, [navigate]);
 
   if (error) {
     return (
@@ -65,6 +108,7 @@ function App() {
   }
 
   return (
+    <BlocksProvider>
     <div className="h-screen flex flex-col font-sans antialiased">
       <header className="p-3 border-b border-border flex items-center justify-between">
         <div className="flex gap-2 items-center">
@@ -73,9 +117,9 @@ function App() {
           </strong>
           <nav className="flex ml-3 gap-0">
             <button
-              onClick={() => setActiveTab('Architect')}
+              onClick={() => stableNavigate('/')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === 'Architect'
+                location.pathname === '/' || location.pathname === '/architect'
                   ? 'border-primary text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
@@ -83,9 +127,9 @@ function App() {
               Architect
             </button>
             <button
-              onClick={() => setActiveTab('Connections')}
+              onClick={() => stableNavigate('/connections')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === 'Connections'
+                location.pathname === '/connections'
                   ? 'border-primary text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
@@ -93,9 +137,9 @@ function App() {
               Connections
             </button>
             <button
-              onClick={() => setActiveTab('Mapper')}
+              onClick={() => stableNavigate('/mapper')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === 'Mapper'
+                location.pathname === '/mapper'
                   ? 'border-primary text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
@@ -103,9 +147,9 @@ function App() {
               Mapper
             </button>
             <button
-              onClick={() => setActiveTab('Analysis')}
+              onClick={() => stableNavigate('/analysis')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === 'Analysis'
+                location.pathname === '/analysis'
                   ? 'border-primary text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
@@ -113,9 +157,9 @@ function App() {
               Analysis
             </button>
             <button
-              onClick={() => setActiveTab('Settings')}
+              onClick={() => stableNavigate('/settings')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === 'Settings'
+                location.pathname === '/settings'
                   ? 'border-primary text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
@@ -123,9 +167,9 @@ function App() {
               Settings
             </button>
             <button
-              onClick={() => setActiveTab('Library')}
+              onClick={() => stableNavigate('/library')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === 'Library'
+                location.pathname === '/library'
                   ? 'border-primary text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
@@ -133,9 +177,9 @@ function App() {
               Library
             </button>
             <button
-              onClick={() => setActiveTab('Sandbox')}
+              onClick={() => stableNavigate('/sandbox')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === 'Sandbox'
+                location.pathname === '/sandbox'
                   ? 'border-primary text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
@@ -158,25 +202,45 @@ function App() {
 
       <div className="flex-1 overflow-auto">
         {showAnalysisTuner && (
-          <div className="fixed z-50 top-16 right-8 bg-slate-900 p-3 rounded shadow-lg border border-slate-800">
-            <AnalysisTuner fileHash={globalThis.__currentFileHash || sandboxContext?.fileHash || null} onUpdate={() => {}} />
+          <div className="fixed z-50 top-16 right-8 bg-slate-900 p-3 rounded shadow-lg border border-slate-800 w-96 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-5rem)] overflow-y-auto">
+            <AnalysisTuner 
+              fileHash={window.__lastAnalysisHash || globalThis.__currentFileHash || sandboxContext?.fileHash || null} 
+              onUpdate={() => {
+                // Trigger reload of analysis data after tuner changes
+                const hash = window.__lastAnalysisHash || globalThis.__currentFileHash;
+                if (hash && window.electronAPI) {
+                  window.electronAPI.invoke('ANALYSIS:LOAD_TO_ARCHITECT', hash)
+                    .then((res) => {
+                      if (res.success && res.blocks) {
+                        console.log('Analysis reloaded after tuner update:', res.blocks.length, 'blocks');
+                      }
+                    })
+                    .catch(console.error);
+                }
+              }} 
+            />
           </div>
         )}
-        {activeTab === 'Architect' && <ArchitectNew />}
-        {activeTab === 'Connections' && <Connections />}
-        {activeTab === 'Mapper' && <Mapper />}
-        {activeTab === 'Analysis' && <AnalysisJobManager />}
-        {activeTab === 'Settings' && <SettingsView />}
-        {activeTab === 'Library' && <LibraryView />}
-        {activeTab === 'Sandbox' && <SandboxView data={sandboxContext || {}} />}
+        {/* Routes - no HashRouter here, it's in main.jsx */}
+        <Routes>
+          <Route path="/" element={<ArchitectNew />} />
+          <Route path="/architect" element={<ArchitectNew />} />
+          <Route path="/connections" element={<Connections />} />
+          <Route path="/mapper" element={<Mapper />} />
+          <Route path="/analysis" element={<AnalysisJobManager />} />
+          <Route path="/settings" element={<SettingsView />} />
+          <Route path="/library" element={<LibraryView />} />
+          <Route path="/sandbox" element={<SandboxView data={sandboxContext || {}} />} />
+        </Routes>
       </div>
 
       <footer className="border-t border-border p-2.5">
         <div className="max-w-5xl mx-auto flex justify-center">
-          <Toolbar openSandbox={() => setActiveTab('Sandbox')} openSettings={() => setActiveTab('Settings')} />
+          <Toolbar openSandbox={() => stableNavigate('/sandbox')} openSettings={() => stableNavigate('/settings')} />
         </div>
       </footer>
     </div>
+    </BlocksProvider>
   );
 }
 

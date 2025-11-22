@@ -10,6 +10,19 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    watch: {
+      // 🔴 Tell Vite to ignore the database and electron folder to prevent infinite reloads
+      ignored: [
+        '**/electron/**',
+        '**/userData/**',
+        '**/*.sqlite',
+        '**/*.db',
+        '**/node_modules/**',
+        '**/dist/**',
+      ],
+    },
+  },
   build: {
     outDir: 'dist',
     assetsDir: '.',

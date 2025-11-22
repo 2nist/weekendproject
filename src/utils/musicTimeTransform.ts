@@ -5,18 +5,23 @@
 
 export interface BeatNode {
   id: string;
-  beatIndex: number; // 0-3 within measure
+  beatIndex: number; // 0 to (numerator-1) within measure
   isAttack: boolean; // True if chord starts here
+  isSustain: boolean; // True if it's a continuation of a previous chord (opposite of isAttack)
   chordLabel: string | null; // "Cmaj7" or null (rest/sustain)
   functionLabel?: string; // "V7" (Theorist data)
   isSelected: boolean;
   timestamp: number; // Original timestamp in seconds
   drums?: { hasKick: boolean; hasSnare: boolean; drums: string[] };
+  confidence?: number; // 0-1 confidence score from analysis engine
+  source?: string; // Engine source: 'TS_Viterbi_Engine', 'Python_Essentia', etc.
+  hasConflict?: boolean; // True if multiple engines disagreed on chord
 }
 
 export interface Measure {
   index: number; // Bar number (1-indexed)
-  beats: BeatNode[]; // [1, 2, 3, 4]
+  beats: BeatNode[]; // Array of beats, length equals time signature numerator
+  timeSignature: { numerator: number; denominator: number }; // Time signature for this measure
   progressionId?: string; // "ii-V-I-group-1"
   startTime: number; // Start time in seconds
   endTime: number; // End time in seconds
@@ -65,21 +70,29 @@ export function transformAnalysisToGrid(
   // Calculate beats per second
   const beatsPerSecond = tempoBpm / 60;
   const secondsPerBeat = 1 / beatsPerSecond;
-  // Derive beats per measure from the detected beat grid time signature when present
-  let beatsPerMeasure = 4; // default 4/4
+  
+  // Extract time signature from beat_grid.time_signature (default to 4/4)
+  let timeSignature = { numerator: 4, denominator: 4 };
   try {
     const timeSig = linearAnalysis?.beat_grid?.time_signature;
     if (typeof timeSig === 'string' && timeSig.includes('/')) {
       const parts = timeSig.split('/');
       const num = parseInt(parts[0], 10);
-      if (!isNaN(num) && num > 0) beatsPerMeasure = num;
+      const den = parseInt(parts[1], 10);
+      if (!isNaN(num) && num > 0) timeSignature.numerator = num;
+      if (!isNaN(den) && den > 0) timeSignature.denominator = den;
     } else if (typeof timeSig === 'object' && timeSig !== null) {
       const num = Number(timeSig?.numerator || timeSig?.num || timeSig?.beatsPerBar);
-      if (!isNaN(num) && num > 0) beatsPerMeasure = num;
+      const den = Number(timeSig?.denominator || timeSig?.den || timeSig?.beatUnit || 4);
+      if (!isNaN(num) && num > 0) timeSignature.numerator = num;
+      if (!isNaN(den) && den > 0) timeSignature.denominator = den;
     }
   } catch (e) {
-    beatsPerMeasure = 4;
+    // Default to 4/4
+    timeSignature = { numerator: 4, denominator: 4 };
   }
+  
+  const beatsPerMeasure = timeSignature.numerator;
 
   // If we have downbeats, use them; otherwise calculate from tempo
   const measures: Measure[] = [];
@@ -87,7 +100,10 @@ export function transformAnalysisToGrid(
   let currentBeatInBar = 0;
 
   // Create a map of chord events by timestamp with robust label extraction
+  // Also track all events at each timestamp to detect conflicts
   const chordMap = new Map<number, any>();
+  const chordEventsByTime = new Map<number, any[]>(); // Track all events per timestamp for conflict detection
+  
   chordEvents.forEach((event: any) => {
     const roundedTime = Math.round(event.timestamp * 10) / 10; // Round to 0.1s
     // Extract chord label: prefer annotated `chord` (from theorist), then fallback to chord_candidate root+quality
@@ -104,9 +120,17 @@ export function transformAnalysisToGrid(
       ...event,
       _chord_label: chordLabel || event.chord || null,
     };
+    
+    // Track all events at this timestamp
+    if (!chordEventsByTime.has(roundedTime)) {
+      chordEventsByTime.set(roundedTime, []);
+    }
+    chordEventsByTime.get(roundedTime)!.push(wrapped);
+    
+    // Keep the highest confidence event as primary
     if (
       !chordMap.has(roundedTime) ||
-      event.confidence > (chordMap.get(roundedTime)?.confidence || 0)
+      (event.confidence || 0) > (chordMap.get(roundedTime)?.confidence || 0)
     ) {
       chordMap.set(roundedTime, wrapped);
     }
@@ -127,14 +151,14 @@ export function transformAnalysisToGrid(
 
   // If we have beat timestamps, use them for precise timing
   if (beatTimestamps.length > 0) {
-    let measureStartTime = 0;
-    let measureBeats: BeatNode[] = [];
+    let measureStartTime = beatTimestamps[0] || 0;
+    let currentMeasure: Measure | null = null;
+    let currentBar = 1;
+    let beatIndexInMeasure = 0;
 
     for (let i = 0; i < beatTimestamps.length; i++) {
       const beatTime = beatTimestamps[i];
-      const beatIndex = i % beatsPerMeasure;
-      const isDownbeat =
-        downbeatTimestamps.includes(beatTime) || beatIndex === 0;
+      const isDownbeat = downbeatTimestamps.includes(beatTime);
 
       // Find the closest chord event to this beat
       let chordEvent: any = null;
@@ -154,11 +178,37 @@ export function transformAnalysisToGrid(
         chordEvent?.chord ||
         chordEvent?.roman_numeral ||
         null;
+      
+      // Check if this is a new chord attack
+      const previousBeat = currentMeasure?.beats[currentMeasure.beats.length - 1];
       const isAttack =
         chordEvent !== null &&
-        (measureBeats.length === 0 ||
-          measureBeats[measureBeats.length - 1]?.chordLabel !==
-            chordLabelAtBeat);
+        (previousBeat === undefined ||
+          previousBeat.chordLabel !== chordLabelAtBeat);
+      const isSustain = !isAttack && chordEvent !== null && previousBeat?.chordLabel === chordLabelAtBeat;
+
+      // Extract confidence and source from chord event
+      const confidence = chordEvent?.confidence || chordEvent?.probability_score || null;
+      const source = chordEvent?.source || null;
+      
+      // Check for conflicts: multiple engines with different chords at this timestamp
+      let hasConflict = false;
+      if (chordEvent) {
+        const eventsAtTime = chordEventsByTime.get(Math.round(beatTime * 10) / 10) || [];
+        if (eventsAtTime.length > 1) {
+          // Check if different sources have different chord labels
+          const uniqueChords = new Set(
+            eventsAtTime
+              .map((e: any) => e._chord_label || e.chord || e.roman_numeral)
+              .filter((c: any) => c !== null)
+          );
+          const uniqueSources = new Set(
+            eventsAtTime.map((e: any) => e.source).filter((s: any) => s)
+          );
+          // Conflict if multiple sources AND multiple chords
+          hasConflict = uniqueSources.size > 1 && uniqueChords.size > 1;
+        }
+      }
 
       const drums = (function () {
         // preferred: index mapping when lengths match
@@ -187,47 +237,51 @@ export function transformAnalysisToGrid(
         }
         return { hasKick: false, hasSnare: false, drums: [] };
       })();
+      
       const beatNode: BeatNode = {
-        id: `beat-${currentBar}-${beatIndex + 1}`,
-        beatIndex,
+        id: `beat-${currentBar}-${beatIndexInMeasure + 1}`,
+        beatIndex: beatIndexInMeasure,
         isAttack,
+        isSustain,
         chordLabel: chordLabelAtBeat,
         functionLabel: chordEvent?.function || chordEvent?.roman_numeral,
         isSelected: false,
         drums: drums || { hasKick: false, hasSnare: false, drums: [] },
         timestamp: beatTime,
+        confidence: confidence !== null ? (typeof confidence === 'number' ? confidence : parseFloat(confidence)) : undefined,
+        source: source || undefined,
+        hasConflict,
       };
 
-      measureBeats.push(beatNode);
-
-      // If we've completed a measure (4 beats) or hit a downbeat
-      if (
-        beatIndex === beatsPerMeasure - 1 ||
-        (isDownbeat && measureBeats.length === beatsPerMeasure)
-      ) {
-        const measureEndTime = beatTime;
-        measures.push({
+      // Initialize new measure if needed
+      if (!currentMeasure) {
+        currentMeasure = {
           index: currentBar,
-          beats: [...measureBeats],
-          startTime: measureStartTime,
-          endTime: measureEndTime,
-        });
-
+          beats: [],
+          timeSignature: { ...timeSignature },
+          startTime: beatTime,
+          endTime: beatTime,
+        };
         measureStartTime = beatTime;
-        measureBeats = [];
+      }
+
+      // Add beat to current measure
+      currentMeasure.beats.push(beatNode);
+      currentMeasure.endTime = beatTime;
+      beatIndexInMeasure++;
+
+      // Critical Logic: When currentMeasure.beats.length equals the numerator, push the measure and start a new one
+      if (currentMeasure.beats.length === beatsPerMeasure) {
+        measures.push(currentMeasure);
         currentBar++;
+        beatIndexInMeasure = 0;
+        currentMeasure = null; // Will be initialized on next iteration
       }
     }
 
     // Handle remaining beats if song doesn't end on a measure boundary
-    if (measureBeats.length > 0) {
-      const lastBeatTime = beatTimestamps[beatTimestamps.length - 1];
-      measures.push({
-        index: currentBar,
-        beats: measureBeats,
-        startTime: measureStartTime,
-        endTime: lastBeatTime,
-      });
+    if (currentMeasure && currentMeasure.beats.length > 0) {
+      measures.push(currentMeasure);
     }
   } else {
     // Fallback: Calculate measures from tempo
@@ -263,10 +317,14 @@ export function transformAnalysisToGrid(
           (beat === 0 ||
             measureBeats[beat - 1]?.chordLabel !== chordLabelAtBeat);
 
+        const previousBeat = measureBeats[beat - 1];
+        const isSustain = !isAttack && chordEvent !== null && previousBeat?.chordLabel === chordLabelAtBeat;
+        
         measureBeats.push({
           id: `beat-${bar}-${beat + 1}`,
           beatIndex: beat,
           isAttack,
+          isSustain,
           chordLabel: chordLabelAtBeat,
           functionLabel: chordEvent?.function || chordEvent?.roman_numeral,
           isSelected: false,
@@ -277,6 +335,7 @@ export function transformAnalysisToGrid(
       measures.push({
         index: bar,
         beats: measureBeats,
+        timeSignature: { ...timeSignature },
         startTime: measureStartTime,
         endTime: measureStartTime + beatsPerMeasure * secondsPerBeat,
       });
@@ -419,3 +478,5 @@ function formatProgressionLabel(progressionId: string): string {
     ' Turnaround'
   );
 }
+
+

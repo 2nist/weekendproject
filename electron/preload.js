@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('ANALYSIS:TRANSFORM_GRID', payload),
   resegment: (payload) =>
     ipcRenderer.invoke('ANALYSIS:RESEGMENT', payload),
+  sculptSection: (payload) =>
+    ipcRenderer.invoke('ANALYSIS:SCULPT_SECTION', payload),
   parseMidi: (payload) =>
     ipcRenderer.invoke('LIBRARY:PARSE_MIDI', payload),
   attachMidi: (payload) =>

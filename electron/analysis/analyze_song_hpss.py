@@ -81,7 +81,7 @@ def analyze(file_path: str):
         duration = float(librosa.get_duration(y=y, sr=sr))
         print(json.dumps({'status': 'progress', 'value': 20}), flush=True)
 
-        y_harm, y_perc = librosa.effects.hpss(y, margin=3.0)
+        y_harm, y_perc = librosa.effects.hpss(y, margin=(1.0, 5.0))
         print(json.dumps({'status': 'progress', 'value': 40}), flush=True)
 
         tempo, beat_frames = librosa.beat.beat_track(y=y_perc, sr=sr)
@@ -90,9 +90,17 @@ def analyze(file_path: str):
         beat_times = librosa.frames_to_time(beat_frames, sr=sr)
         print(json.dumps({'status': 'progress', 'value': 50}), flush=True)
 
-        chroma = librosa.feature.chroma_cens(
-            y=y_harm, sr=sr, n_chroma=12, bins_per_octave=36
+        # Hybrid Chroma: Combine CQT (sharp/timing) + CENS (smooth/context)
+        # 1. Sharp features (Timing/Pitch) - CQT chroma for precise attack detection
+        chroma_cqt = librosa.feature.chroma_cqt(
+            y=y_harm, sr=sr, threshold=0.1, n_chroma=12, bins_per_octave=36
         )
+        # 2. Smooth features (Context/Stability) - CENS for harmonic stability
+        chroma_cens = librosa.feature.chroma_cens(
+            y=y_harm, sr=sr, win_len_smooth=11, n_chroma=12, bins_per_octave=36
+        )
+        # 3. Weighted Merge (60% CQT for accuracy, 40% CENS for stability)
+        chroma = (0.6 * chroma_cqt) + (0.4 * chroma_cens)
         mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
         chroma_transposed = chroma.T
         mfcc_transposed = mfcc.T

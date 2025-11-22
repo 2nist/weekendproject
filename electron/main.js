@@ -10,8 +10,86 @@ const osc = require('node-osc');
 const metadataLookup = require('./analysis/metadataLookup');
 const sessionManager = require('./analysis/sessionManager');
 const listener = require('./analysis/listener');
-const architect = require('./analysis/architect_clean');
+const architect = require('./analysis/architect_canonical_final');
+// V2 architect (multi-scale + adaptive)
+let architectV2 = null;
+try {
+  architectV2 = require('./analysis/architect_v2');
+  console.log('✅ Architect V2 loaded successfully');
+} catch (e) {
+  console.warn('⚠️ Architect V2 not available, falling back to clean version:', e.message);
+}
 const theorist = require('./analysis/theorist');
+// Engine Config (calibrated parameters)
+let engineConfig = null;
+try {
+  require('ts-node').register({ transpileOnly: true });
+  const ec = require('./config/engineConfig.ts');
+  engineConfig = ec;
+  console.log('✅ EngineConfig loaded successfully');
+} catch (e) {
+  try {
+    engineConfig = require('./config/engineConfig');
+  } catch (e2) {
+    console.warn('⚠️ EngineConfig not available:', e2?.message || e?.message);
+  }
+}
+// Calibration Service - lazy load helper
+function loadCalibrationService() {
+  if (calibrationService) return calibrationService;
+  
+  try {
+    try {
+      require('ts-node').register({ transpileOnly: true });
+    } catch (e) {
+      // ts-node might already be registered
+    }
+    const cs = require('./services/calibration.ts');
+    // Handle both default export and named exports
+    if (cs.default) {
+      calibrationService = cs.default;
+    } else if (cs.getBenchmarks && cs.runCalibration) {
+      // Named exports - create object
+      calibrationService = {
+        getBenchmarks: cs.getBenchmarks,
+        runCalibration: cs.runCalibration,
+      };
+    } else {
+      calibrationService = cs;
+    }
+    console.log('✅ CalibrationService loaded successfully');
+    console.log('✅ CalibrationService type:', typeof calibrationService);
+    console.log('✅ CalibrationService methods:', calibrationService ? Object.keys(calibrationService) : 'null');
+    if (calibrationService) {
+      console.log('✅ getBenchmarks:', typeof calibrationService.getBenchmarks);
+      console.log('✅ runCalibration:', typeof calibrationService.runCalibration);
+    }
+    return calibrationService;
+  } catch (err) {
+    console.error('⚠️ Failed to load CalibrationService (TS):', err?.message || err);
+    console.error('⚠️ Stack:', err?.stack);
+    try {
+      const cs = require('./services/calibration');
+      calibrationService = cs && cs.default ? cs.default : cs;
+      if (calibrationService) {
+        console.log('✅ CalibrationService loaded (JS fallback)');
+      }
+      return calibrationService;
+    } catch (e2) {
+      console.warn('⚠️ CalibrationService not available:', e2?.message || e2);
+      console.warn('⚠️ Stack:', e2?.stack);
+      return null;
+    }
+  }
+}
+
+let calibrationService = null;
+// Try to load immediately, but don't fail if it doesn't work
+try {
+  calibrationService = loadCalibrationService();
+} catch (e) {
+  console.warn('⚠️ CalibrationService initial load failed, will try lazy load:', e.message);
+}
 const fileProcessor = require('./analysis/fileProcessor');
 const progressTracker = require('./analysis/progressTracker');
 const genreProfiles = require('./analysis/genreProfiles');
@@ -63,6 +141,8 @@ const dialog = electron.dialog;
 let oscClients = {};
 let mainWindow;
 let currentBlocks = []; // Store current blocks to persist across requests
+// In-memory cache for preview changes (not yet committed to DB)
+const previewAnalysisCache = new Map(); // fileHash -> analysis object
 
 const status = {
   bpm: 120,
@@ -134,6 +214,22 @@ function broadcastStatus() {
   }
 }
 
+// Helper function to broadcast logs to frontend DevTools console
+function broadcastLog(message) {
+  // Log to terminal (standard console output)
+  console.log(message);
+  
+  // Send to renderer process (DevTools console)
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.webContents.send('DEBUG:LOG', message);
+    } catch (err) {
+      // Silently ignore if window is destroyed or send fails
+      // This prevents crashes during shutdown
+    }
+  }
+}
+
 app.whenReady().then(async () => {
   await db.init(app);
 
@@ -150,6 +246,26 @@ app.whenReady().then(async () => {
     reaper: new osc.Client('127.0.0.1', settings.reaper_port),
     ableton: new osc.Client('127.0.0.1', settings.ableton_port),
   };
+
+  // Restore last analysis to prevent "No blocks to send" on startup
+  try {
+    const lastAnalysis = db.getMostRecentAnalysis();
+    if (lastAnalysis && lastAnalysis.structural_map && lastAnalysis.structural_map.sections) {
+      const sections = lastAnalysis.structural_map.sections;
+      currentBlocks = sections.map((section, index) => ({
+        id: section.id || `section-${index}`,
+        label: section.label || section.section_label || 'Unknown',
+        bars: section.bars || 4,
+        time_range: section.time_range,
+        probability_score: section.probability_score || 0.8,
+      }));
+      console.log(`✅ Restored ${currentBlocks.length} blocks from last analysis on startup`);
+    } else {
+      console.log('ℹ️ No previous analysis found to restore');
+    }
+  } catch (error) {
+    console.warn('⚠️ Failed to restore last analysis:', error.message);
+  }
 
   const isDev =
     process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
@@ -190,7 +306,18 @@ app.whenReady().then(async () => {
 registerIpcHandler('DOWNLOADER:DOWNLOAD', async (event, url) => {
   try {
     console.log('DOWNLOADER: Starting download for', url);
-    const res = await downloaderBridge.spawnDownload(url);
+    const res = await downloaderBridge.spawnDownload(url, null, (p) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try {
+          mainWindow.webContents.send('DOWNLOADER:PROGRESS', p);
+        } catch (_) {}
+      }
+      if (p.percent !== undefined) {
+        console.log(`DOWNLOADER: ${p.status} ${p.percent.toFixed(2)}%`);
+      } else {
+        console.log(`DOWNLOADER: status=${p.status}`);
+      }
+    });
     console.log('DOWNLOADER: Success', res);
     return { success: true, path: res.path, title: res.title };
   } catch (err) {
@@ -306,6 +433,36 @@ registerIpcHandler('DB:LOAD_ARRANGEMENT', async (event, arg) => {
   return arrangements;
 });
 
+registerIpcHandler('DB:GET_SETTINGS', async (event) => {
+  try {
+    const settings = db.getSettings();
+    return { success: true, settings: settings || {} };
+  } catch (error) {
+    console.error('Error getting settings:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+registerIpcHandler('DB:SET_SETTING', async (event, { key, value }) => {
+  try {
+    const result = db.setSetting(key, value);
+    if (result.success) {
+      // If setting is a port, update OSC clients if needed
+      if (key === 'reaper_port' || key === 'ableton_port') {
+        const settings = db.getSettings();
+        const reaperPort = parseInt(settings.reaper_port || '9000');
+        const abletonPort = parseInt(settings.ableton_port || '9001');
+        oscClients.reaper = new osc.Client('127.0.0.1', reaperPort);
+        oscClients.ableton = new osc.Client('127.0.0.1', abletonPort);
+      }
+    }
+    return result;
+  } catch (error) {
+    console.error('Error setting setting:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 registerIpcHandler('TRACK:RESOLVE_INDEX', async (event, trackName) => {
   return trackResolver.getTrackIndex(trackName);
 });
@@ -353,7 +510,19 @@ ipcMain.on('UI:REQUEST_STATUS', (event) => {
   broadcastStatus();
 });
 
+// Track last request time to prevent rapid-fire requests
+let lastInitialRequestTime = 0;
+const INITIAL_REQUEST_THROTTLE_MS = 2000; // Only allow one request per 2 seconds
+
 ipcMain.on('UI:REQUEST_INITIAL', (event) => {
+  const now = Date.now();
+  // Throttle requests to prevent spam
+  if (now - lastInitialRequestTime < INITIAL_REQUEST_THROTTLE_MS) {
+    // Silently ignore rapid repeated requests
+    return;
+  }
+  lastInitialRequestTime = now;
+
   // Send current blocks if any exist
   if (currentBlocks.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
     console.log(
@@ -362,10 +531,12 @@ ipcMain.on('UI:REQUEST_INITIAL', (event) => {
       'existing blocks',
     );
     mainWindow.webContents.send('UI:BLOCKS_UPDATE', currentBlocks);
+    // Only broadcast status if we actually sent blocks
+    broadcastStatus();
   } else {
-    console.log('UI:REQUEST_INITIAL: No blocks to send');
+    // Silently handle no blocks case - this is normal when no analysis has been run yet
+    // Don't log or broadcast to avoid unnecessary UI updates
   }
-  broadcastStatus();
 });
 
 // Dialog IPC Handlers
@@ -418,6 +589,48 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
 
     // NOTE: Required at top of file for early failure detection
 
+    // Load calibrated engine config (from engine-config.json)
+    let engineConfigData = null;
+    if (engineConfig && engineConfig.loadConfig) {
+      try {
+        engineConfigData = engineConfig.loadConfig();
+        console.log('✅ Loaded calibrated engine config');
+      } catch (e) {
+        console.warn('⚠️ Failed to load engine config, using defaults:', e.message);
+      }
+    }
+    
+    // Load Analysis Lab parameters from DB settings (if available)
+    // These override the calibrated config if set by user
+    const dbSettings = db.getSettings();
+    const analysisLabSettings = {
+      // Harmony parameters - prefer DB settings, then calibrated, then defaults
+      transitionProb: parseFloat(dbSettings.analysis_transitionProb) || engineConfigData?.chordOptions?.transitionProb || 0.8,
+      diatonicBonus: parseFloat(dbSettings.analysis_diatonicBonus) || engineConfigData?.chordOptions?.diatonicBonus || 0.1,
+      rootPeakBias: parseFloat(dbSettings.analysis_rootPeakBias) || engineConfigData?.chordOptions?.rootPeakBias || 0.1,
+      temperature: parseFloat(dbSettings.analysis_temperature) || engineConfigData?.chordOptions?.temperature || 0.1,
+      globalKey: dbSettings.analysis_globalKey || engineConfigData?.chordOptions?.globalKey || null,
+      // Structure parameters (V1) - prefer DB settings, then calibrated, then defaults
+      noveltyKernel: parseInt(dbSettings.analysis_noveltyKernel) || engineConfigData?.architectOptions?.noveltyKernel || 5,
+      sensitivity: parseFloat(dbSettings.analysis_sensitivity) || engineConfigData?.architectOptions?.sensitivity || 0.6,
+      mergeChromaThreshold: parseFloat(dbSettings.analysis_mergeChromaThreshold) || engineConfigData?.architectOptions?.mergeChromaThreshold || 0.92,
+      minSectionDurationSec: parseFloat(dbSettings.analysis_minSectionDurationSec) || engineConfigData?.architectOptions?.minSectionDurationSec || 8.0,
+      forceOverSeg: dbSettings.analysis_forceOverSeg === 'true' ? true : (dbSettings.analysis_forceOverSeg === 'false' ? false : (engineConfigData?.architectOptions?.forceOverSeg || false)),
+      // Structure parameters (V2) - prefer DB settings, then calibrated, then defaults
+      detailLevel: parseFloat(dbSettings.analysis_detailLevel) || engineConfigData?.architectOptions?.detailLevel || 0.5,
+      adaptiveSensitivity: parseFloat(dbSettings.analysis_adaptiveSensitivity) || engineConfigData?.architectOptions?.adaptiveSensitivity || 1.5,
+      mfccWeight: parseFloat(dbSettings.analysis_mfccWeight) || engineConfigData?.architectOptions?.mfccWeight || 0.5,
+    };
+    
+    // Override with userHints if provided
+    const harmonyOpts = {
+      transitionProb: userHints.transitionProb ?? analysisLabSettings.transitionProb,
+      diatonicBonus: userHints.diatonicBonus ?? analysisLabSettings.diatonicBonus,
+      rootPeakBias: userHints.rootPeakBias ?? analysisLabSettings.rootPeakBias,
+      temperature: userHints.temperature ?? analysisLabSettings.temperature,
+      globalKey: userHints.globalKey ?? analysisLabSettings.globalKey ?? userHints.key_hint,
+    };
+
     const metadata = metadataLookup.gatherMetadata(filePath, userHints);
     const fileInfo = fileProcessor.getFileInfo(filePath);
     const fileHash = fileInfo.hash;
@@ -439,6 +652,7 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
         tracker.broadcast();
       },
       metadata,
+      harmonyOpts, // Pass harmony options to listener
     );
     if (!result || !result.linear_analysis)
       throw new Error('Pass 1 returned invalid result');
@@ -452,42 +666,61 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
     session.setState('pass2');
     tracker.update('pass2', 0);
     tracker.broadcast();
-    // 🔴 AGGRESSIVE OVERSHOOT CONFIGURATION
+    
+    // Use Analysis Lab parameters for architect (with fallback defaults)
     const architectOptions = {
-      // Downsample factor used by architect to avoid OOM on long songs
-      downsampleFactor: 4,
-      // 1. Sensitivity: Make it look for tiny changes
-      forceOverSeg: true,
-      noveltyKernel: 3,
-      sensitivity: 0.6,
-
-      // 2. The "Anti-Merge" Wall: Prevent merging unless identical
-      mergeChromaThreshold: 0.99,
+      downsampleFactor: userHints.downsampleFactor ?? 4,
+      forceOverSeg: userHints.forceOverSeg ?? analysisLabSettings.forceOverSeg ?? false,
+      noveltyKernel: userHints.noveltyKernel ?? analysisLabSettings.noveltyKernel ?? 5,
+      sensitivity: userHints.sensitivity ?? analysisLabSettings.sensitivity ?? 0.6,
+      mergeChromaThreshold: userHints.mergeChromaThreshold ?? analysisLabSettings.mergeChromaThreshold ?? 0.92,
+      minSectionDurationSec: userHints.minSectionDurationSec ?? analysisLabSettings.minSectionDurationSec ?? 8.0,
+      // V1 fallback options
       exactChromaThreshold: 0.99,
       exactMfccThreshold: 0.95,
-
-      // 3. Theory Glue: Turn it off or make it strict
       progressionSimilarityThreshold: 0.95,
       progressionSimilarityMode: 'normalized',
-
-      // 4. Duration: Allow short phrases
       minSectionsStop: 20,
-      minSectionDurationSec: 4,
     };
-    console.log('Applying Golden Architecture Config:', architectOptions);
-    const structural_map = await architect.analyzeStructure(
+    console.log('🏗️ Applying Architect Config from Analysis Lab:', architectOptions);
+    
+    // Map to V2 adaptive parameters
+    const computeScaleWeights = (detailLevel) => {
+      const phraseW = Math.max(0.2, Math.min(0.8, detailLevel));
+      const movementW = 1 - phraseW - 0.2;
+      return { phrase: phraseW, section: 0.2, movement: Math.max(0.05, movementW) };
+    };
+    
+    const v2Options = {
+      downsampleFactor: architectOptions.downsampleFactor,
+      adaptiveSensitivity: userHints.adaptiveSensitivity ?? analysisLabSettings.adaptiveSensitivity ?? 1.5,
+      scaleWeights: userHints.scaleWeights ?? computeScaleWeights(analysisLabSettings.detailLevel),
+      mfccWeight: userHints.mfccWeight ?? analysisLabSettings.mfccWeight ?? 0.5,
+      forceOverSeg: architectOptions.forceOverSeg,
+    };
+    
+    // V2 enabled by default when available; set USE_ARCHITECT_V2=0 to force legacy
+    const useV2 = !!architectV2 && process.env.USE_ARCHITECT_V2 !== '0';
+    const architectVersion = useV2 ? 'V2 (Multi-Scale + Adaptive)' : 'V1 (Canonical)';
+    console.log(`🏗️ Using Architect ${architectVersion}${process.env.USE_ARCHITECT_V2 === '0' ? ' (forced via USE_ARCHITECT_V2=0)' : ''}`);
+    const structural_map = await (useV2 ? architectV2.analyzeStructure : architect.analyzeStructure)(
       linear_analysis,
       (p) => {
-        tracker.update('pass2', p);
+        tracker.update('pass2', p.progress || p);
         tracker.broadcast();
       },
-      architectOptions,
+      useV2 ? v2Options : architectOptions,
     );
     if (!structural_map || !structural_map.sections)
       throw new Error('Pass 2 returned invalid result');
     session.setResult('pass2', structural_map);
     tracker.update('pass2', 100);
     tracker.broadcast();
+
+    // Store fileHash globally for AnalysisTuner access
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.executeJavaScript(`window.__lastAnalysisHash = '${fileHash}';`);
+    }
 
     // Pass 3: Theorist
     session.setState('pass3');
@@ -594,6 +827,22 @@ registerIpcHandler('ANALYSIS:GET_STATUS', async (event, fileHash) => {
 
 registerIpcHandler('ANALYSIS:GET_RESULT', async (event, fileHash) => {
   console.log('IPC: ANALYSIS:GET_RESULT called for fileHash:', fileHash);
+  
+  // Check preview cache first (for uncommitted changes)
+  if (previewAnalysisCache.has(fileHash)) {
+    const cached = previewAnalysisCache.get(fileHash);
+    console.log('IPC: Returning cached preview analysis with:', {
+      id: cached.id,
+      hasLinearAnalysis: !!cached.linear_analysis,
+      hasStructuralMap: !!cached.structural_map,
+      sectionCount: cached.structural_map?.sections?.length || 0,
+      eventCount: cached.linear_analysis?.events?.length || 0,
+      source: 'preview_cache',
+    });
+    return cached;
+  }
+  
+  // Otherwise, read from database
   const analysis = db.getAnalysis(fileHash);
 
   if (analysis) {
@@ -603,6 +852,7 @@ registerIpcHandler('ANALYSIS:GET_RESULT', async (event, fileHash) => {
       hasStructuralMap: !!analysis.structural_map,
       sectionCount: analysis.structural_map?.sections?.length || 0,
       eventCount: analysis.linear_analysis?.events?.length || 0,
+      source: 'database',
     });
   } else {
     console.warn('IPC: No analysis found for fileHash:', fileHash);
@@ -688,6 +938,8 @@ registerIpcHandler(
       if (listener && listener.recalcChords) {
         // Add detection options + globalKey to metadata so chord analyzer can pick it up
         const cloned = JSON.parse(JSON.stringify(analysis.linear_analysis));
+        // Pass structuralMap if available for section-based key bias
+        const structuralMap = analysis.structural_map || null;
         if (!cloned.metadata) cloned.metadata = {};
         const opt = options || {};
         const mergedOptions = {
@@ -699,11 +951,14 @@ registerIpcHandler(
           transitionProb: opt.transitionProb ?? 0.8,
           diatonicBonus: opt.diatonicBonus ?? 0.1,
           rootPeakBias: opt.rootPeakBias ?? 0.1,
+          windowShift: opt.windowShift ?? 0, // Window shift in seconds (-0.05 to +0.05)
+          bassWeight: opt.bassWeight ?? 0, // Bass weight for inversion detection (0-1)
           frameHop:
             cloned.metadata?.frame_hop_seconds ||
             cloned.metadata?.hop_length / cloned.metadata?.sample_rate ||
             0.0232,
           rootOnly: opt.rootOnly === undefined ? true : !!opt.rootOnly,
+          structuralMap: structuralMap, // Pass structural map for section-based key bias
         };
         if (mergedOptions.globalKey) {
           cloned.metadata.detected_key = mergedOptions.globalKey;
@@ -713,30 +968,56 @@ registerIpcHandler(
         const res = listener.recalcChords(cloned, mergedOptions);
         if (!res || !res.success)
           throw new Error(res?.error || 'recalc failed');
-        if (options.commit) {
-          // Persist changes to DB by updating the analysis linear_analysis
-          analysis.linear_analysis.events = res.events;
-          // Update the harmonic_context if globalKey overridden
-          if (mergedOptions.globalKey) {
-            analysis.harmonic_context = analysis.harmonic_context || {};
-            analysis.harmonic_context.global_key =
-              analysis.harmonic_context.global_key || {};
-            analysis.harmonic_context.global_key.primary_key = mergedOptions.globalKey;
-            analysis.harmonic_context.global_key.confidence =
-              analysis.harmonic_context.global_key.confidence || 0.95;
-          }
-          // Persist chosen analyzer tuning into harmonic_context for transparency
-          analysis.harmonic_context = analysis.harmonic_context || {};
-          analysis.harmonic_context.chord_analyzer_options =
-            analysis.harmonic_context.chord_analyzer_options || {};
-          analysis.harmonic_context.chord_analyzer_options = {
-            ...(analysis.harmonic_context.chord_analyzer_options || {}),
-            ...(mergedOptions || {}),
-          };
-          // call DB update to modify the existing analysis row
-          const success = db.updateAnalysisById(analysis.id, analysis);
-          if (!success) throw new Error('Failed to commit analysis update');
+        
+        // Apply changes to analysis object (in-memory) for preview OR commit
+        const updatedAnalysis = JSON.parse(JSON.stringify(analysis)); // Deep clone
+        updatedAnalysis.linear_analysis.events = res.events;
+        // Update the harmonic_context if globalKey overridden
+        if (mergedOptions.globalKey) {
+          updatedAnalysis.harmonic_context = updatedAnalysis.harmonic_context || {};
+          updatedAnalysis.harmonic_context.global_key =
+            updatedAnalysis.harmonic_context.global_key || {};
+          updatedAnalysis.harmonic_context.global_key.primary_key = mergedOptions.globalKey;
+          updatedAnalysis.harmonic_context.global_key.confidence =
+            updatedAnalysis.harmonic_context.global_key.confidence || 0.95;
         }
+        // Persist chosen analyzer tuning into harmonic_context for transparency
+        updatedAnalysis.harmonic_context = updatedAnalysis.harmonic_context || {};
+        updatedAnalysis.harmonic_context.chord_analyzer_options =
+          updatedAnalysis.harmonic_context.chord_analyzer_options || {};
+        updatedAnalysis.harmonic_context.chord_analyzer_options = {
+          ...(updatedAnalysis.harmonic_context.chord_analyzer_options || {}),
+          ...(mergedOptions || {}),
+        };
+        
+        if (options.commit) {
+          // Persist changes to DB by updating the analysis row
+          const success = db.updateAnalysisById(updatedAnalysis.id, updatedAnalysis);
+          if (!success) throw new Error('Failed to commit analysis update');
+          // Clear preview cache since changes are now in DB
+          previewAnalysisCache.delete(fileHash);
+          console.log('✅ Chord recalculation committed to database');
+        } else {
+          // Preview mode: store in cache so ANALYSIS:GET_RESULT can return it
+          previewAnalysisCache.set(fileHash, updatedAnalysis);
+          console.log('👁️ Chord recalculation applied in preview mode (cached, not committed)');
+        }
+        
+        // Trigger UI update by reloading analysis
+        // For preview mode, we need to reload the analysis so Sandbox view sees updated chords
+        // Even though we don't commit to DB, the in-memory analysis object is updated
+        try {
+          // Reload analysis to Architect (this will use the updated in-memory analysis)
+          // The analysis object in memory now has the updated events
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            // Send a signal to reload the analysis
+            mainWindow.webContents.send('ANALYSIS:RELOAD_REQUESTED', { fileHash });
+            console.log('✅ Requested analysis reload for preview');
+          }
+        } catch (loadErr) {
+          console.warn('⚠️ Failed to request reload:', loadErr.message);
+        }
+        
         return { success: true, events: res.events };
       }
       // Fallback: no listener helper exposed
@@ -815,6 +1096,110 @@ registerIpcHandler('ANALYSIS:GET_BY_ID', async (event, analysisId) => {
   }
 });
 
+// Apply section sculpting parameters in real-time
+registerIpcHandler('ANALYSIS:SCULPT_SECTION', async (event, { fileHash, sectionId, parameters = {}, commit = false }) => {
+  try {
+    if (!fileHash || !sectionId) throw new Error('fileHash and sectionId required');
+    
+    // Get analysis (from cache if preview, otherwise from DB)
+    let analysis = previewAnalysisCache.get(fileHash) || db.getAnalysis(fileHash);
+    if (!analysis || !analysis.structural_map || !analysis.structural_map.sections) {
+      throw new Error('Analysis not found or invalid');
+    }
+
+    // Find the section
+    const sections = analysis.structural_map.sections;
+    const sectionIndex = sections.findIndex(s => 
+      (s.id === sectionId) || (s.section_id === sectionId)
+    );
+    
+    if (sectionIndex === -1) {
+      throw new Error(`Section ${sectionId} not found`);
+    }
+
+    const section = sections[sectionIndex];
+    
+    // Clone analysis for modification
+    const updatedAnalysis = JSON.parse(JSON.stringify(analysis));
+    const updatedSection = updatedAnalysis.structural_map.sections[sectionIndex];
+    
+    // Initialize DNA objects if needed
+    updatedSection.harmonic_dna = updatedSection.harmonic_dna || {};
+    updatedSection.rhythmic_dna = updatedSection.rhythmic_dna || {};
+    
+    // Apply parameters to section DNA
+    if (parameters.harmonic_complexity !== undefined) {
+      updatedSection.harmonic_dna.complexity = parameters.harmonic_complexity;
+      updatedSection.harmonic_dna.complexity_level = 
+        parameters.harmonic_complexity <= 30 ? 'basic' :
+        parameters.harmonic_complexity <= 60 ? 'extended' :
+        parameters.harmonic_complexity <= 85 ? 'complex' : 'neo-soul';
+    }
+    
+    if (parameters.rhythmic_density !== undefined) {
+      updatedSection.rhythmic_dna.density = parameters.rhythmic_density;
+      updatedSection.rhythmic_dna.density_level =
+        parameters.rhythmic_density <= 25 ? 'sparse' :
+        parameters.rhythmic_density <= 50 ? 'moderate' :
+        parameters.rhythmic_density <= 75 ? 'dense' : 'very_dense';
+    }
+    
+    if (parameters.groove_swing !== undefined) {
+      updatedSection.rhythmic_dna.groove_swing = parameters.groove_swing;
+      updatedSection.rhythmic_dna.swing_ratio =
+        parameters.groove_swing === 0 ? 1.0 :
+        parameters.groove_swing <= 33 ? 1.2 :
+        parameters.groove_swing <= 66 ? 1.5 :
+        parameters.groove_swing <= 85 ? 1.7 : 2.0;
+    }
+    
+    if (parameters.tension !== undefined) {
+      updatedSection.harmonic_dna.tension = parameters.tension;
+      updatedSection.harmonic_dna.tension_level =
+        parameters.tension <= 30 ? 'diatonic' :
+        parameters.tension <= 60 ? 'chromatic' :
+        parameters.tension <= 85 ? 'tritone_sub' : 'altered';
+    }
+    
+    // Store sculpting parameters in section metadata
+    updatedSection.sculpting_parameters = {
+      ...(updatedSection.sculpting_parameters || {}),
+      ...parameters,
+      last_updated: new Date().toISOString(),
+    };
+    
+    if (commit) {
+      // Persist to database
+      const success = db.updateAnalysisById(updatedAnalysis.id, updatedAnalysis);
+      if (!success) throw new Error('Failed to commit section update');
+      previewAnalysisCache.delete(fileHash); // Clear cache
+      console.log('✅ Section sculpting committed to database');
+    } else {
+      // Preview mode: store in cache
+      previewAnalysisCache.set(fileHash, updatedAnalysis);
+      console.log('👁️ Section sculpting applied in preview mode (cached)');
+    }
+    
+    // Trigger UI reload
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('ANALYSIS:RELOAD_REQUESTED', { fileHash });
+      }
+    } catch (loadErr) {
+      console.warn('⚠️ Failed to request reload:', loadErr.message);
+    }
+    
+    return { 
+      success: true, 
+      section: updatedSection,
+      commit: commit || false,
+    };
+  } catch (err) {
+    console.error('[ANALYSIS:SCULPT_SECTION] Error:', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
 // Re-segment the structure (fast-ish) by re-running architect + theorist on existing linear_analysis
 registerIpcHandler('ANALYSIS:RESEGMENT', async (event, { fileHash, options = {}, commit = false }) => {
   try {
@@ -822,15 +1207,25 @@ registerIpcHandler('ANALYSIS:RESEGMENT', async (event, { fileHash, options = {},
     const analysis = db.getAnalysis(fileHash);
     if (!analysis || !analysis.linear_analysis) throw new Error('Analysis not found');
     // merge defaults with provided options
-    const architectOptions = {
-      downsampleFactor: options.downsampleFactor || 4,
-      forceOverSeg: options.forceOverSeg === undefined ? false : !!options.forceOverSeg,
-      noveltyKernel: options.noveltyKernel || 5,
-      sensitivity: options.sensitivity || 0.6,
-      mergeChromaThreshold: options.mergeChromaThreshold || 0.92,
-      minSectionDurationSec: options.minSectionDurationSec || 8.0,
-    };
-    const structural_map = await architect.analyzeStructure(analysis.linear_analysis, (p) => {}, architectOptions);
+    const useV2 = options.version === 'v2' && architectV2;
+    const architectOptions = useV2
+      ? {
+          downsampleFactor: options.downsampleFactor || 4,
+          adaptiveSensitivity: options.adaptiveSensitivity || 1.5,
+          scaleWeights: options.scaleWeights || null,
+          mfccWeight: options.mfccWeight,
+          forceOverSeg: options.forceOverSeg === undefined ? false : !!options.forceOverSeg,
+          clusterSimilarity: options.clusterSimilarity || 0.6,
+        }
+      : {
+          downsampleFactor: options.downsampleFactor || 4,
+          forceOverSeg: options.forceOverSeg === undefined ? false : !!options.forceOverSeg,
+          noveltyKernel: options.noveltyKernel || 5,
+          sensitivity: options.sensitivity || 0.6,
+          mergeChromaThreshold: options.mergeChromaThreshold || 0.92,
+          minSectionDurationSec: options.minSectionDurationSec || 8.0,
+        };
+    const structural_map = await (useV2 ? architectV2.analyzeStructure : architect.analyzeStructure)(analysis.linear_analysis, (p) => {}, architectOptions);
     if (!structural_map) throw new Error('architect failed');
     const corrected = await theorist.correctStructuralMap(structural_map, analysis.linear_analysis, analysis.metadata || {}, (p) => {});
     if (commit) {
@@ -838,7 +1233,7 @@ registerIpcHandler('ANALYSIS:RESEGMENT', async (event, { fileHash, options = {},
       const success = db.updateAnalysisById(analysis.id, analysis);
       if (!success) throw new Error('Failed to commit resegment');
     }
-    return { success: true, structural_map: corrected };
+    return { success: true, structural_map: corrected, debug: structural_map.debug || null };
   } catch (err) {
     return { success: false, error: err.message || String(err) };
   }
@@ -890,6 +1285,21 @@ registerIpcHandler('SANDBOX:GENERATE', async (event, constraints) => {
 });
 
 registerIpcHandler(
+  'LIBRARY:PROMOTE_TO_BENCHMARK',
+  async (event, { projectId }) => {
+    try {
+      if (!libraryService || !libraryService.promoteToBenchmark) {
+        throw new Error('Library service not available');
+      }
+      const result = await libraryService.promoteToBenchmark(projectId);
+      return result;
+    } catch (err) {
+      return { success: false, error: err.message || String(err) };
+    }
+  },
+);
+
+registerIpcHandler(
   'LIBRARY:RE_ANALYZE',
   async (event, { projectId, force = false }) => {
     try {
@@ -927,6 +1337,21 @@ registerIpcHandler('ARCHITECT:UPDATE_BLOCKS', async (event, blocks = []) => {
     return { success: true, count: currentBlocks.length };
   } catch (error) {
     console.error('ARCHITECT:UPDATE_BLOCKS error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Manual boundary insertion (prototype). Accepts a frame index and echoes back.
+registerIpcHandler('ARCHITECT:FORCE_SPLIT', async (event, { frame }) => {
+  try {
+    if (typeof frame !== 'number' || frame < 0) {
+      return { success: false, error: 'Invalid frame index' };
+    }
+    console.log('[ARCHITECT:FORCE_SPLIT] Requested manual split at frame', frame);
+    // Prototype: In a future version, load current analysis, inject boundary, recompute clusters.
+    return { success: true, insertedFrame: frame };
+  } catch (error) {
+    console.error('[ARCHITECT:FORCE_SPLIT] Error:', error);
     return { success: false, error: error.message };
   }
 });
@@ -1004,7 +1429,16 @@ registerIpcHandler('ANALYSIS:LOAD_TO_ARCHITECT', async (event, fileHash) => {
       console.warn('Main window not available for sending blocks');
     }
 
-    return { success: true, blocks, count: blocks.length };
+    const noveltyCurve = analysis.structural_map.debug?.noveltyCurve || analysis.structural_map.debug?.novelty_curve || null;
+    
+    // Store fileHash for AnalysisTuner access
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        mainWindow.webContents.executeJavaScript(`window.__lastAnalysisHash = '${fileHash}';`);
+      } catch (e) {}
+    }
+    
+    return { success: true, blocks, count: blocks.length, noveltyCurve };
   } catch (error) {
     console.error('Error loading analysis to Architect:', error);
     return { success: false, error: error.message };
@@ -1052,6 +1486,80 @@ registerIpcHandler(
     return { success: false, error: 'Session not found' };
   },
 );
+
+// Calibration handler - uses new optimization service
+registerIpcHandler('CALIBRATION:GET_BENCHMARKS', async (event) => {
+  try {
+    console.log('[IPC] CALIBRATION:GET_BENCHMARKS called');
+    
+    // Try to load service if not already loaded
+    if (!calibrationService) {
+      console.log('[IPC] CalibrationService not loaded, attempting lazy load...');
+      calibrationService = loadCalibrationService();
+    }
+    
+    if (!calibrationService) {
+      const errorMsg = 'CalibrationService not available. Check terminal for TypeScript compilation errors.';
+      console.error('[IPC]', errorMsg);
+      throw new Error(errorMsg);
+    }
+    
+    console.log('[IPC] calibrationService:', calibrationService ? 'exists' : 'null');
+    
+    console.log('[IPC] calibrationService.getBenchmarks:', calibrationService?.getBenchmarks ? 'exists' : 'missing');
+    console.log('[IPC] Available methods:', calibrationService ? Object.keys(calibrationService) : 'N/A');
+    
+    if (!calibrationService.getBenchmarks) {
+      const errorMsg = `CalibrationService.getBenchmarks not found. Available: ${Object.keys(calibrationService || {}).join(', ')}`;
+      console.error('[IPC]', errorMsg);
+      throw new Error(errorMsg);
+    }
+    
+    const benchmarks = calibrationService.getBenchmarks();
+    console.log('[IPC] CALIBRATION:GET_BENCHMARKS returning', benchmarks.length, 'benchmarks');
+    return { success: true, benchmarks };
+  } catch (error) {
+    console.error('[IPC] CALIBRATION:GET_BENCHMARKS error:', error);
+    return { success: false, error: error.message || String(error) };
+  }
+});
+
+registerIpcHandler('CALIBRATION:RUN', async (event, { selectedIds = null }) => {
+  try {
+    // Try to load service if not already loaded
+    if (!calibrationService) {
+      console.log('[IPC] CalibrationService not loaded, attempting lazy load...');
+      calibrationService = loadCalibrationService();
+    }
+    
+    if (!calibrationService) {
+      throw new Error('CalibrationService not available. Check terminal for TypeScript compilation errors.');
+    }
+    
+    // Send progress updates to renderer
+    const sendProgress = (data) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try {
+          mainWindow.webContents.send('CALIBRATION:PROGRESS', data);
+        } catch (err) {
+          console.error('Error sending calibration progress:', err);
+        }
+      }
+    };
+
+    // Create log callback that broadcasts to frontend DevTools
+    const logCallback = (message) => {
+      broadcastLog(message);
+    };
+
+    const result = await calibrationService.runCalibration(sendProgress, logCallback, selectedIds);
+    return result;
+  } catch (error) {
+    console.error('Calibration error:', error);
+    broadcastLog(`[CALIBRATION ERROR] ${error.message || String(error)}`);
+    return { success: false, error: error.message || String(error) };
+  }
+});
 
 // Helper function to determine form
 function determineForm(sections) {

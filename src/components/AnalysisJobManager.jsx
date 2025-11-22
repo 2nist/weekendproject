@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { sectionsToBlocks } from '../utils/architectBlocks';
 import YouTubeInput from './importer/YouTubeInput';
 import ProbabilityDashboard from './ProbabilityDashboard';
+import AnalysisTuner from './tools/AnalysisTuner';
 
 /**
  * Analysis Job Manager
@@ -9,14 +10,6 @@ import ProbabilityDashboard from './ProbabilityDashboard';
  */
 export default function AnalysisJobManager() {
   const [filePath, setFilePath] = useState('');
-  const [userHints, setUserHints] = useState({
-    genre: 'pop',
-    expected_form: '',
-    key_hint: '',
-    mode_hint: 'ionian',
-    harmonic_complexity: 50,
-    tempo_hint: '',
-  });
   const [analysisStatus, setAnalysisStatus] = useState(null);
   const [progress, setProgress] = useState({
     overall: 0,
@@ -196,10 +189,10 @@ export default function AnalysisJobManager() {
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       console.log('Starting analysis for:', filePath);
-      // Start analysis
+      // Start analysis (userHints removed - use Analysis Lab for fine-tuning)
       const result = await window.electronAPI.invoke('ANALYSIS:START', {
         filePath,
-        userHints,
+        userHints: {}, // Analysis Lab handles fine-tuning after analysis
       });
       console.log('Analysis result:', result);
 
@@ -282,212 +275,81 @@ export default function AnalysisJobManager() {
   };
 
   return (
-    <div style={{ padding: '20px', maxWidth: '600px' }}>
-      <h2>Audio Analysis</h2>
+    <div className="p-5 max-w-3xl">
+      <h2 className="text-2xl font-bold text-foreground mb-5">Audio Analysis</h2>
 
-      <div style={{ marginBottom: '20px' }}>
-        <div>
-          <strong>Audio File:</strong>
+      <div className="mb-5">
+        <div className="flex items-center gap-3 mb-3">
+          <strong className="text-foreground">Audio File:</strong>
           <button
             onClick={handleFileSelect}
-            style={{
-              marginLeft: '10px',
-              padding: '8px 16px',
-              backgroundColor: '#2563eb',
-              color: 'white',
-              border: 'none',
-              borderRadius: '5px',
-              cursor: 'pointer',
-            }}
+            className="px-4 py-2 bg-primary text-primary-foreground border-none rounded-md cursor-pointer hover:opacity-90 transition-opacity"
           >
             Select Audio File...
           </button>
         </div>
-        <div style={{ marginTop: '12px' }}>
+        <div className="mt-3">
           <YouTubeInput onFileReady={(path) => setFilePath(path)} />
         </div>
         {filePath && (
-          <div
-            style={{
-              marginTop: '10px',
-              padding: '8px',
-              backgroundColor: '#f0f0f0',
-              borderRadius: '5px',
-            }}
-          >
-            <div
-              style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}
-            >
+          <div className="mt-3 p-3 bg-card border border-border rounded-md">
+            <div className="text-xs text-muted-foreground mb-2">
               Selected:
             </div>
-            <div
-              style={{
-                fontFamily: 'monospace',
-                fontSize: '11px',
-                wordBreak: 'break-all',
-              }}
-            >
+            <div className="font-mono text-xs text-card-foreground break-all">
               {filePath}
             </div>
           </div>
         )}
       </div>
 
-      <div style={{ marginBottom: '20px' }}>
-        <h3>Analysis Hints (Optional)</h3>
-        <p style={{ fontSize: '12px', color: '#666' }}>
-          Useful for non-stereotypical song forms
-        </p>
-
-        <div style={{ marginTop: '10px' }}>
-          <label>
-            Genre:
-            <select
-              value={userHints.genre}
-              onChange={(e) =>
-                setUserHints({ ...userHints, genre: e.target.value })
+      {filePath && (
+        <div className="mb-5">
+          <h3 className="text-lg font-semibold text-foreground mb-3">Analysis Lab</h3>
+          <p className="text-xs text-muted-foreground mb-4">
+            Fine-tune analysis parameters before running or refine results after analysis
+          </p>
+          <AnalysisTuner
+            fileHash={fileHash}
+            onUpdate={() => {
+              // Refresh analysis results if available
+              if (fileHash && analysisResult) {
+                // Could trigger a refresh of the analysis view here if needed
+                console.log('Analysis updated, consider refreshing view');
               }
-              style={{ marginLeft: '10px', padding: '5px' }}
-            >
-              <option value="pop">Pop</option>
-              <option value="jazz">Jazz</option>
-              <option value="jazz_traditional">Jazz / Traditional</option>
-              <option value="neo_soul">Neo-Soul</option>
-              <option value="rock">Rock</option>
-            </select>
-          </label>
+            }}
+          />
         </div>
-
-        <div style={{ marginTop: '10px' }}>
-          <label>
-            Expected Form:
-            <input
-              type="text"
-              value={userHints.expected_form}
-              onChange={(e) =>
-                setUserHints({ ...userHints, expected_form: e.target.value })
-              }
-              placeholder="e.g., Verse-Chorus, AABA"
-              style={{ marginLeft: '10px', padding: '5px', width: '200px' }}
-            />
-          </label>
-        </div>
-
-        <div style={{ marginTop: '10px' }}>
-          <label>
-            Key Hint:
-            <input
-              type="text"
-              value={userHints.key_hint}
-              onChange={(e) =>
-                setUserHints({ ...userHints, key_hint: e.target.value })
-              }
-              placeholder="e.g., C, G, F"
-              style={{ marginLeft: '10px', padding: '5px', width: '100px' }}
-            />
-          </label>
-        </div>
-
-        <div style={{ marginTop: '10px' }}>
-          <label>
-            BPM Hint:
-            <input
-              type="number"
-              min="40"
-              max="240"
-              value={userHints.tempo_hint}
-              onChange={(e) =>
-                setUserHints({
-                  ...userHints,
-                  tempo_hint: e.target.value,
-                })
-              }
-              placeholder="e.g., 116"
-              style={{ marginLeft: '10px', padding: '5px', width: '120px' }}
-            />
-          </label>
-        </div>
-
-        <div style={{ marginTop: '10px' }}>
-          <label>
-            Harmonic Complexity (0-100):
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={userHints.harmonic_complexity}
-              onChange={(e) =>
-                setUserHints({
-                  ...userHints,
-                  harmonic_complexity: parseInt(e.target.value),
-                })
-              }
-              style={{ marginLeft: '10px', width: '200px' }}
-            />
-            <span style={{ marginLeft: '10px' }}>
-              {userHints.harmonic_complexity}%
-            </span>
-          </label>
-        </div>
-      </div>
+      )}
 
       <button
         onClick={handleStartAnalysis}
         disabled={!filePath || analysisStatus === 'processing'}
-        style={{
-          padding: '10px 20px',
-          fontSize: '16px',
-          backgroundColor: '#2563eb',
-          color: 'white',
-          border: 'none',
-          borderRadius: '5px',
-          cursor: analysisStatus === 'processing' ? 'not-allowed' : 'pointer',
-        }}
+        className="px-5 py-2.5 text-base bg-primary text-primary-foreground border-none rounded-md cursor-pointer hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {analysisStatus === 'processing' ? 'Analyzing...' : 'Start Analysis'}
       </button>
 
       {analysisStatus && (
-        <div
-          style={{
-            marginTop: '20px',
-            padding: '15px',
-            backgroundColor: '#f5f5f5',
-            borderRadius: '5px',
-          }}
-        >
-          <div style={{ marginBottom: '10px' }}>
+        <div className="mt-5 p-4 bg-card border border-border rounded-md">
+          <div className="mb-3 text-foreground">
             <strong>Status:</strong> {currentStep || analysisStatus}
           </div>
 
           {analysisStatus === 'processing' && (
             <div>
-              <div style={{ marginBottom: '5px' }}>
+              <div className="mb-2 text-foreground">
                 <strong>Overall Progress:</strong>{' '}
                 {Math.round(progress.overall || 0)}%
               </div>
-              <div
-                style={{
-                  width: '100%',
-                  height: '20px',
-                  backgroundColor: '#ddd',
-                  borderRadius: '10px',
-                  overflow: 'hidden',
-                }}
-              >
+              <div className="w-full h-5 bg-muted rounded-full overflow-hidden">
                 <div
-                  style={{
-                    width: `${progress.overall || 0}%`,
-                    height: '100%',
-                    backgroundColor: '#2563eb',
-                    transition: 'width 0.3s ease',
-                  }}
+                  className="h-full bg-primary transition-all duration-300"
+                  style={{ width: `${progress.overall || 0}%` }}
                 />
               </div>
 
-              <div
-                style={{ marginTop: '15px', fontSize: '12px', color: '#666' }}
-              >
+              <div className="mt-4 text-xs text-muted-foreground space-y-1">
                 <div>Pass 1 (Listener): {Math.round(progress.pass1 || 0)}%</div>
                 <div>
                   Pass 2 (Architect): {Math.round(progress.pass2 || 0)}%
@@ -499,48 +361,22 @@ export default function AnalysisJobManager() {
 
           {analysisStatus === 'completed' && (
             <div>
-              <div
-                style={{
-                  color: '#059669',
-                  fontWeight: 'bold',
-                  marginBottom: '10px',
-                }}
-              >
+              <div className="text-green-600 font-bold mb-3">
                 ✓ Analysis completed successfully!
                 {fileHash && (
-                  <div
-                    style={{
-                      fontSize: '12px',
-                      marginTop: '5px',
-                      color: '#666',
-                    }}
-                  >
+                  <div className="text-xs text-muted-foreground mt-1">
                     File Hash: {fileHash.substring(0, 8)}...
                   </div>
                 )}
               </div>
 
               {analysisResult && analysisResult.loadResult && (
-                <div
-                  style={{
-                    marginTop: '10px',
-                    padding: '10px',
-                    backgroundColor: '#dcfce7',
-                    borderRadius: '5px',
-                    fontSize: '12px',
-                  }}
-                >
+                <div className="mt-3 p-3 bg-green-900/20 border border-green-700/30 rounded-md text-xs text-green-400">
                   <strong>
                     ✓ {analysisResult.loadResult.count} sections loaded into
                     Architect view
                   </strong>
-                  <div
-                    style={{
-                      marginTop: '5px',
-                      fontSize: '11px',
-                      color: '#666',
-                    }}
-                  >
+                  <div className="mt-1 text-xs text-muted-foreground">
                     Switch to the Architect tab to view them. If they don't
                     appear, click "Refresh Blocks" in the Architect view.
                   </div>
@@ -556,21 +392,13 @@ export default function AnalysisJobManager() {
                     marginTop: '15px',
                   }}
                 >
-                  <div
-                    style={{
-                      flex: '1 1 320px',
-                      padding: '10px',
-                      backgroundColor: '#fff',
-                      borderRadius: '5px',
-                      border: '1px solid #ddd',
-                    }}
-                  >
-                    <h4 style={{ marginBottom: '10px' }}>Analysis Results:</h4>
+                  <div className="flex-1 min-w-[320px] p-3 bg-card border border-border rounded-md text-card-foreground">
+                    <h4 className="mb-3 text-foreground font-semibold">Analysis Results:</h4>
 
                     {analysisResult.linear_analysis && (
-                      <div style={{ marginBottom: '10px', fontSize: '12px' }}>
+                      <div className="mb-3 text-xs text-card-foreground">
                         <strong>Linear Analysis:</strong>
-                        <div style={{ marginLeft: '10px', marginTop: '5px' }}>
+                        <div className="ml-3 mt-1 space-y-1">
                           <div>
                             Duration:{' '}
                             {analysisResult.linear_analysis.metadata?.duration_seconds?.toFixed(
@@ -617,9 +445,9 @@ export default function AnalysisJobManager() {
                     )}
 
                     {analysisResult.structural_map && (
-                      <div style={{ marginBottom: '10px', fontSize: '12px' }}>
+                      <div className="mb-3 text-xs text-card-foreground">
                         <strong>Structural Map:</strong>
-                        <div style={{ marginLeft: '10px', marginTop: '5px' }}>
+                        <div className="ml-3 mt-1 space-y-1">
                           <div>
                             Sections:{' '}
                             {analysisResult.structural_map.sections?.length ||
@@ -638,11 +466,11 @@ export default function AnalysisJobManager() {
                                 >
                                   {analysisResult.structural_map.sections.map(
                                     (section, idx) => (
-                                      <li key={idx}>
+                                      <li key={idx} className="text-card-foreground">
                                         {section.section_label || 'Unknown'} (
                                         {section.section_variant || 1})
                                         {section.time_range && (
-                                          <span style={{ color: '#666' }}>
+                                          <span className="text-muted-foreground">
                                             {' '}
                                             -{' '}
                                             {section.time_range.start_time?.toFixed(
@@ -666,9 +494,9 @@ export default function AnalysisJobManager() {
                     )}
 
                     {analysisResult.arrangement_flow && (
-                      <div style={{ marginBottom: '10px', fontSize: '12px' }}>
+                      <div className="mb-3 text-xs text-card-foreground">
                         <strong>Arrangement Flow:</strong>
-                        <div style={{ marginLeft: '10px', marginTop: '5px' }}>
+                        <div className="ml-3 mt-1 space-y-1">
                           <div>
                             Form:{' '}
                             {analysisResult.arrangement_flow.form || 'N/A'}
@@ -683,9 +511,9 @@ export default function AnalysisJobManager() {
                     )}
 
                     {analysisResult.harmonic_context && (
-                      <div style={{ marginBottom: '10px', fontSize: '12px' }}>
+                      <div className="mb-3 text-xs text-card-foreground">
                         <strong>Harmonic Context:</strong>
-                        <div style={{ marginLeft: '10px', marginTop: '5px' }}>
+                        <div className="ml-3 mt-1 space-y-1">
                           <div>
                             Global Key:{' '}
                             {analysisResult.harmonic_context.global_key
@@ -702,27 +530,11 @@ export default function AnalysisJobManager() {
                       </div>
                     )}
 
-                    <div
-                      style={{
-                        marginTop: '15px',
-                        padding: '10px',
-                        backgroundColor: '#f0f9ff',
-                        borderRadius: '5px',
-                        fontSize: '11px',
-                        color: '#666',
-                      }}
-                    >
+                    <div className="mt-4 p-3 bg-muted border border-border rounded-md text-xs text-muted-foreground">
                       <strong>Note:</strong> Navigate to the "Architect" tab to
                       view the full structural analysis and edit the song.
                       {analysisResult?.loadResult?.success && (
-                        <div
-                          style={{
-                            marginTop: '8px',
-                            padding: '8px',
-                            backgroundColor: '#dcfce7',
-                            borderRadius: '4px',
-                          }}
-                        >
+                        <div className="mt-2 p-2 bg-green-900/20 border border-green-700/30 rounded text-green-400">
                           ✓ {analysisResult.loadResult.count} sections have been
                           loaded into the Architect view. Click "Refresh Blocks"
                           if they don't appear.
@@ -736,16 +548,7 @@ export default function AnalysisJobManager() {
               )}
 
               {!analysisResult && (
-                <div
-                  style={{
-                    marginTop: '10px',
-                    padding: '10px',
-                    backgroundColor: '#fef3c7',
-                    borderRadius: '5px',
-                    fontSize: '12px',
-                    color: '#92400e',
-                  }}
-                >
+                <div className="mt-3 p-3 bg-yellow-900/20 border border-yellow-700/30 rounded-md text-xs text-yellow-400">
                   Loading analysis results...
                 </div>
               )}
@@ -753,7 +556,7 @@ export default function AnalysisJobManager() {
           )}
 
           {analysisStatus === 'failed' && (
-            <div style={{ color: '#dc2626', fontWeight: 'bold' }}>
+            <div className="text-destructive font-bold">
               ✗ Analysis failed. Please check the console for details.
             </div>
           )}
