@@ -86,15 +86,19 @@ export const AppearanceTab: React.FC = () => {
 
   useEffect(() => {
     // Load saved theme or current CSS values
-    const saved = loadTheme();
-    if (saved) {
-      setTheme({ ...DEFAULT_THEME, ...saved });
-      applyTheme({ ...DEFAULT_THEME, ...saved });
-    } else {
-      // Load current values from DOM
-      const current = loadCurrentTheme();
-      setTheme(current);
-    }
+    const loadThemeData = async () => {
+      const { loadThemeAsync } = await import('@/lib/themeUtils');
+      const saved = await loadThemeAsync();
+      if (saved) {
+        setTheme({ ...DEFAULT_THEME, ...saved });
+        applyTheme({ ...DEFAULT_THEME, ...saved });
+      } else {
+        // Load current values from DOM
+        const current = loadCurrentTheme();
+        setTheme(current);
+      }
+    };
+    loadThemeData();
   }, []);
 
   const handleChange = (key: string, val: string) => {

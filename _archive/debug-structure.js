@@ -11,7 +11,7 @@ const REPORT_PATH = path.resolve(
 
 async function run() {
   const songName = process.argv[2] || '13 A Day In The Life';
-  console.log(`🔍 Debugging: ${songName}...`);
+  console.log(`Debugging: ${songName}...`);
 
   const files = fs.readdirSync(TEST_DIR);
   const audioFile = files.find(
@@ -22,7 +22,7 @@ async function run() {
   );
 
   if (!audioFile) {
-    console.error('❌ Audio file not found!');
+    console.error('Audio file not found!');
     return;
   }
 
@@ -31,7 +31,7 @@ async function run() {
     path.join(TEST_DIR, audioFile),
   );
   if (!analysisWrap || !analysisWrap.linear_analysis) {
-    console.error('❌ Analysis failed');
+    console.error('Analysis failed');
     return;
   }
   const linear = analysisWrap.linear_analysis;
@@ -55,7 +55,7 @@ async function run() {
     truthSecs,
   );
   fs.writeFileSync(REPORT_PATH, html);
-  console.log(`\n✅ Report generated: ${REPORT_PATH}`);
+  console.log(`\nReport generated: ${REPORT_PATH}`);
 }
 
 function generateHTML(title, debug, sections, truth) {

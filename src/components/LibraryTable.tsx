@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from './ui/button';
-import { Music, Youtube, File, Play } from 'lucide-react';
+import { Music, Youtube, File, Play, Eye } from 'lucide-react';
+import ProjectDetailView from './library/ProjectDetailView';
 
 function SourceIcon({ project }: { project: any }) {
   if (project.midi_path) return <Music className="w-4 h-4" />;
@@ -17,7 +18,10 @@ export default function LibraryTable({ projects, onAnalyze, onReAnalyze, onAttac
   onOpenSandbox: (project: any) => void;
   isLoading?: boolean;
 }) {
+  const [selectedProject, setSelectedProject] = useState<any | null>(null);
+
   return (
+    <>
     <div className="overflow-auto">
       <table className="min-w-full text-sm text-left">
         <thead>
@@ -42,6 +46,14 @@ export default function LibraryTable({ projects, onAnalyze, onReAnalyze, onAttac
               <td className="py-2 px-3">{p.status || (p.analysis_id ? 'Analyzed' : 'Pending')}</td>
               <td className="py-2 px-3">
                 <div className="flex gap-2">
+                  <Button
+                    className="btn"
+                    onClick={() => setSelectedProject(p)}
+                    title="View details, play audio, and see lyrics"
+                  >
+                    <Eye className="w-4 h-4 mr-1" />
+                    View
+                  </Button>
                   <Button className="btn" onClick={() => onAnalyze(p)}>Analyze</Button>
                   <Button className="btn" onClick={() => onReAnalyze(p)}>Re-Analyze</Button>
                   <Button className="btn" onClick={() => onAttachMidi(p.id)}>Attach MIDI</Button>
@@ -53,5 +65,12 @@ export default function LibraryTable({ projects, onAnalyze, onReAnalyze, onAttac
         </tbody>
       </table>
     </div>
+    {selectedProject && (
+      <ProjectDetailView
+        project={selectedProject}
+        onClose={() => setSelectedProject(null)}
+      />
+    )}
+    </>
   );
 }

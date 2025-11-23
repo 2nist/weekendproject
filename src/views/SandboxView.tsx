@@ -4,6 +4,7 @@ import { useEditor } from '@/contexts/EditorContext';
 import { SectionContainer } from '@/components/grid/SectionContainer';
 import { Measure } from '@/components/grid/Measure';
 import { BeatCard } from '@/components/grid/BeatCard';
+import { SmartContextMenu } from '@/components/ui/SmartContextMenu';
 import KeySelector from '@/components/tools/KeySelector';
 import ProgressionOverlay from '@/components/grid/ProgressionOverlay';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,73 @@ export const SandboxView = ({ data }: { data: any }) => {
     useAnalysisSandbox();
   const { state, actions: editorActions } = useEditor();
   const { selection } = state;
+  
+  // Track if we've already loaded data to prevent infinite loops
+  const hasLoadedDataRef = React.useRef(false);
+  const lastDataRef = React.useRef<any>(null);
+  
+  // Data flow logging for debugging (throttled to prevent spam)
+  React.useEffect(() => {
+    const logData = () => {
+      console.log('[SandboxView] Grid Data:', {
+        gridLength: grid?.length || 0,
+        sectionsLength: sections?.length || 0,
+        hasGrid: !!grid,
+        hasSections: !!sections,
+        gridSample: grid?.[0] || null,
+        sectionsSample: sections?.[0] || null,
+      });
+    };
+    
+    // Throttle logging to once per second
+    const timeoutId = setTimeout(logData, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [grid?.length, sections?.length]); // Only depend on lengths, not full objects
+  
+  // Update EditorContext when data prop changes or load from fileHash
+  // 🔴 CRITICAL FIX: Remove state.songData from deps to prevent infinite loop
+  React.useEffect(() => {
+    // Create a stable key for comparison
+    const dataKey = data?.linear_analysis 
+      ? `analysis-${data.id || 'full'}`
+      : data?.fileHash || data?.file_hash 
+        ? `hash-${data.fileHash || data.file_hash}`
+        : 'empty';
+    
+    // Skip if we've already processed this exact data
+    if (lastDataRef.current === dataKey) {
+      console.log('[SandboxView] Skipping - already processed:', dataKey);
+      return;
+    }
+    
+    console.log('[SandboxView] Processing data:', {
+      hasLinearAnalysis: !!data?.linear_analysis,
+      hasFileHash: !!(data?.fileHash || data?.file_hash),
+      dataKey,
+    });
+    
+    if (data && (data.linear_analysis || data.fileHash || data.file_hash)) {
+      // Only update if data actually changed
+      if (!hasLoadedDataRef.current || lastDataRef.current !== dataKey) {
+        console.log('[SandboxView] Updating EditorContext with data:', dataKey);
+        editorActions.updateSongData(data);
+        hasLoadedDataRef.current = true;
+        lastDataRef.current = dataKey;
+      }
+    } else if (!hasLoadedDataRef.current) {
+      // If no data prop, try to load from last analysis hash (only once)
+      const fileHash = globalThis.__lastAnalysisHash || globalThis.__currentFileHash || data?.fileHash || data?.file_hash;
+      if (fileHash) {
+        console.log('[SandboxView] Loading analysis from fileHash:', fileHash);
+        // EditorContext will handle loading via its useEffect
+        editorActions.updateSongData({ fileHash, file_hash: fileHash });
+        hasLoadedDataRef.current = true;
+        lastDataRef.current = `hash-${fileHash}`;
+      } else {
+        console.warn('[SandboxView] No data and no fileHash available');
+      }
+    }
+  }, [data, editorActions]); // 🔴 REMOVED state.songData from deps
   
   // Audio playback state
   const audioRef = useRef<AudioEngineRef>(null);
@@ -134,14 +202,12 @@ export const SandboxView = ({ data }: { data: any }) => {
 
   // Handle beat updates from sidebar
   const handleBeatUpdate = useCallback((beatId: string, updates: { chord?: string; function?: string; hasKick?: boolean; hasSnare?: boolean }) => {
-    if (updates.chord !== undefined) {
-      actions.updateChord(beatId, updates.chord);
-      // Update paint chord if we're painting
-      if (paintMode) {
-        setPaintChord(updates.chord);
-      }
+    // Use EditorContext's updateBeat for any patch updates (chord, drums, etc.)
+    actions.updateBeat && actions.updateBeat(beatId, updates as any);
+    // Update paintChord if the chord was changed
+    if (updates.chord !== undefined && paintMode) {
+      setPaintChord(updates.chord);
     }
-    // TODO: Implement function, hasKick, hasSnare updates
   }, [actions, paintMode]);
 
   // Handle paint mode - paint chord on beat
@@ -244,7 +310,7 @@ export const SandboxView = ({ data }: { data: any }) => {
   const activeBeatId = getActiveBeat(allBeats, currentTime);
 
   return (
-    <div className="flex flex-col h-screen text-foreground bg-background">
+    <div className="flex flex-col h-full w-full text-foreground bg-background">
       {/* Audio Engine (hidden) */}
       <AudioEngine
         ref={audioRef}
@@ -361,7 +427,7 @@ export const SandboxView = ({ data }: { data: any }) => {
                       });
                       
                       if (result?.success) {
-                        alert('✅ Successfully added to calibration set! Your corrections will improve future AI accuracy.');
+                        alert('Successfully added to calibration set! Your corrections will improve future AI accuracy.');
                       } else {
                         alert(`Failed to add to calibration set: ${result?.error || 'Unknown error'}`);
                       }
@@ -390,10 +456,16 @@ export const SandboxView = ({ data }: { data: any }) => {
           onMouseUp={handlePaintDragEnd}
           onMouseLeave={handlePaintDragEnd}
         >
-          <div className="flex gap-6">
-          {(!sections || sections.length === 0) && (
-            <div className="text-center text-muted-foreground p-8">
-              No sections available. Load an analysis to view the grid.
+          <div className="flex gap-6 min-h-full">
+          {(!sections || sections.length === 0 || !grid || grid.length === 0) && (
+            <div className="flex-1 flex items-center justify-center text-center text-muted-foreground p-8">
+              <div className="space-y-2">
+                <p className="text-lg font-semibold">No Analysis Data</p>
+                <p className="text-sm">Load an analysis to view the harmonic grid.</p>
+                <p className="text-xs mt-4">
+                  Grid: {grid?.length || 0} measures | Sections: {sections?.length || 0}
+                </p>
+              </div>
             </div>
           )}
           {sections && sections.length > 0 && sections.map((section: any) => {
@@ -426,27 +498,33 @@ export const SandboxView = ({ data }: { data: any }) => {
                           onEdit={() => handleMeasureClick(measure)}
                         >
                           {measure?.beats && Array.isArray(measure.beats) ? measure.beats.map((beat: any) => (
-                            <BeatCard
+                            <SmartContextMenu
                               key={beat.id || Math.random()}
-                              beatIndex={beat.beatIndex}
-                              chord={beat.chordLabel}
-                              isAttack={beat.isAttack}
-                              isSustain={beat.isSustain}
-                              isKick={beat.drums?.hasKick}
-                              isSnare={beat.drums?.hasSnare}
-                              timestamp={beat.timestamp}
-                              isPlaying={activeBeatId === beat.id && isPlaying}
-                              selected={selection?.type === 'beat' && selection.id === beat.id}
-                              onEdit={() => handleBeatClick(beat)}
-                              paintMode={paintMode}
-                              paintChord={paintChord}
-                              isDragging={isDragging}
-                              onPaint={() => handleBeatPaint(beat)}
-                              beat={beat}
-                              showConfidence={showConfidence}
-                              confidence={beat.confidence}
-                              hasConflict={beat.hasConflict}
-                            />
+                              menuType="beat"
+                              entityId={beat.id || beat.timestamp?.toString() || 'unknown'}
+                              data={beat}
+                            >
+                              <BeatCard
+                                beatIndex={beat.beatIndex}
+                                chord={beat.chordLabel}
+                                isAttack={beat.isAttack}
+                                isSustain={beat.isSustain}
+                                isKick={beat.drums?.hasKick}
+                                isSnare={beat.drums?.hasSnare}
+                                timestamp={beat.timestamp}
+                                isPlaying={activeBeatId === beat.id && isPlaying}
+                                selected={selection?.type === 'beat' && selection.id === beat.id}
+                                onEdit={() => handleBeatClick(beat)}
+                                paintMode={paintMode}
+                                paintChord={paintChord}
+                                isDragging={isDragging}
+                                onPaint={() => handleBeatPaint(beat)}
+                                beat={beat}
+                                showConfidence={showConfidence}
+                                confidence={beat.confidence}
+                                hasConflict={beat.hasConflict}
+                              />
+                            </SmartContextMenu>
                           )) : null}
                         </Measure>
                       ))}

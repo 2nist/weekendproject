@@ -28,9 +28,7 @@ export default function AnalysisJobManager() {
 
       const fallbackDispatch = (blocks) => {
         window.__lastBlocks = blocks;
-        window.dispatchEvent(
-          new CustomEvent('UI:BLOCKS_UPDATE', { detail: blocks }),
-        );
+        window.dispatchEvent(new CustomEvent('UI:BLOCKS_UPDATE', { detail: blocks }));
         setAnalysisResult((prev) => ({
           ...(prev || {}),
           loadResult: {
@@ -45,20 +43,12 @@ export default function AnalysisJobManager() {
       if (window.electronAPI && window.electronAPI.invoke) {
         try {
           console.log('Loading analysis results into Architect view...');
-          const loadResult = await window.electronAPI.invoke(
-            'ANALYSIS:LOAD_TO_ARCHITECT',
-            hash,
-          );
+          const loadResult = await window.electronAPI.invoke('ANALYSIS:LOAD_TO_ARCHITECT', hash);
           if (loadResult?.success) {
-            console.log(
-              `✓ Successfully loaded ${loadResult.count} sections into Architect view`,
-            );
+            console.log(`Successfully loaded ${loadResult.count} sections into Architect view`);
             setAnalysisResult((prev) => ({ ...(prev || {}), loadResult }));
           } else {
-            console.warn(
-              'Failed to load analysis to Architect via IPC:',
-              loadResult?.error,
-            );
+            console.warn('Failed to load analysis to Architect via IPC:', loadResult?.error);
             fallbackDispatch(sectionsToBlocks(sections));
           }
         } catch (error) {
@@ -90,9 +80,7 @@ export default function AnalysisJobManager() {
     try {
       // Check if electronAPI is available
       if (!window.electronAPI || !window.electronAPI.showOpenDialog) {
-        alert(
-          'File selection is not available. Please ensure you are running in Electron.',
-        );
+        alert('File selection is not available. Please ensure you are running in Electron.');
         console.error('electronAPI.showOpenDialog is not available');
         return;
       }
@@ -110,12 +98,7 @@ export default function AnalysisJobManager() {
         properties: ['openFile'],
       });
 
-      if (
-        result &&
-        !result.canceled &&
-        result.filePaths &&
-        result.filePaths.length > 0
-      ) {
+      if (result && !result.canceled && result.filePaths && result.filePaths.length > 0) {
         const selectedPath = result.filePaths[0];
         setFilePath(selectedPath);
         setAnalysisStatus(null);
@@ -150,9 +133,7 @@ export default function AnalysisJobManager() {
             );
           }
           if (data && data.state) {
-            setAnalysisStatus(
-              data.state === 'completed' ? 'completed' : 'processing',
-            );
+            setAnalysisStatus(data.state === 'completed' ? 'completed' : 'processing');
             console.log(`State changed to: ${data.state}`);
           }
           if (data && data.fileHash) {
@@ -171,16 +152,12 @@ export default function AnalysisJobManager() {
         progressUnsubscribeRef.current = unsubscribe;
         console.log('Progress listener set up successfully');
       } else {
-        console.warn(
-          'window.ipc.on is not available - progress updates may not work',
-        );
+        console.warn('window.ipc.on is not available - progress updates may not work');
       }
 
       // Check if electronAPI is available
       if (!window.electronAPI || !window.electronAPI.invoke) {
-        alert(
-          'Analysis is not available. Please ensure you are running in Electron.',
-        );
+        alert('Analysis is not available. Please ensure you are running in Electron.');
         console.error('electronAPI.invoke is not available');
         return;
       }
@@ -204,14 +181,8 @@ export default function AnalysisJobManager() {
         try {
           let analysisData = null;
           if (window.electronAPI && window.electronAPI.invoke) {
-            console.log(
-              'Fetching analysis results for fileHash:',
-              result.fileHash,
-            );
-            analysisData = await window.electronAPI.invoke(
-              'ANALYSIS:GET_RESULT',
-              result.fileHash,
-            );
+            console.log('Fetching analysis results for fileHash:', result.fileHash);
+            analysisData = await window.electronAPI.invoke('ANALYSIS:GET_RESULT', result.fileHash);
           }
 
           if (analysisData) {
@@ -245,10 +216,7 @@ export default function AnalysisJobManager() {
             }
 
             if (!analysisData.linear_analysis || !analysisData.structural_map) {
-              console.error(
-                'Analysis data missing required fields!',
-                analysisData,
-              );
+              console.error('Analysis data missing required fields!', analysisData);
             }
 
             await sendBlocksToArchitect(
@@ -293,12 +261,8 @@ export default function AnalysisJobManager() {
         </div>
         {filePath && (
           <div className="mt-3 p-3 bg-card border border-border rounded-md">
-            <div className="text-xs text-muted-foreground mb-2">
-              Selected:
-            </div>
-            <div className="font-mono text-xs text-card-foreground break-all">
-              {filePath}
-            </div>
+            <div className="text-xs text-muted-foreground mb-2">Selected:</div>
+            <div className="font-mono text-xs text-card-foreground break-all">{filePath}</div>
           </div>
         )}
       </div>
@@ -339,8 +303,7 @@ export default function AnalysisJobManager() {
           {analysisStatus === 'processing' && (
             <div>
               <div className="mb-2 text-foreground">
-                <strong>Overall Progress:</strong>{' '}
-                {Math.round(progress.overall || 0)}%
+                <strong>Overall Progress:</strong> {Math.round(progress.overall || 0)}%
               </div>
               <div className="w-full h-5 bg-muted rounded-full overflow-hidden">
                 <div
@@ -351,9 +314,7 @@ export default function AnalysisJobManager() {
 
               <div className="mt-4 text-xs text-muted-foreground space-y-1">
                 <div>Pass 1 (Listener): {Math.round(progress.pass1 || 0)}%</div>
-                <div>
-                  Pass 2 (Architect): {Math.round(progress.pass2 || 0)}%
-                </div>
+                <div>Pass 2 (Architect): {Math.round(progress.pass2 || 0)}%</div>
                 <div>Pass 3 (Theorist): {Math.round(progress.pass3 || 0)}%</div>
               </div>
             </div>
@@ -362,7 +323,7 @@ export default function AnalysisJobManager() {
           {analysisStatus === 'completed' && (
             <div>
               <div className="text-green-600 font-bold mb-3">
-                ✓ Analysis completed successfully!
+                Analysis completed successfully!
                 {fileHash && (
                   <div className="text-xs text-muted-foreground mt-1">
                     File Hash: {fileHash.substring(0, 8)}...
@@ -370,15 +331,46 @@ export default function AnalysisJobManager() {
                 )}
               </div>
 
+              {/* Fallback Alert */}
+              {analysisResult?.linear_analysis?.metadata?.fallback_used && (
+                <div className="mb-4 p-3 bg-yellow-900/20 border border-yellow-700/30 rounded-md text-yellow-400">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">⚠️</span>
+                    <strong>Analysis Fallback Used</strong>
+                  </div>
+                  <div className="text-sm">
+                    The enhanced Python+Librosa analysis was not available, so the system fell back
+                    to{' '}
+                    <span className="font-semibold">
+                      {analysisResult.linear_analysis.metadata.analysis_method
+                        ?.replace('_', ' ')
+                        .toUpperCase()}
+                    </span>{' '}
+                    analysis.
+                    {analysisResult.linear_analysis.metadata.fallback_reason && (
+                      <div className="mt-1 text-xs opacity-80">
+                        Reason:{' '}
+                        {analysisResult.linear_analysis.metadata.fallback_reason.replace('_', ' ')}
+                      </div>
+                    )}
+                    <div className="mt-2 text-xs">
+                      For better results, install Python with librosa:{' '}
+                      <code className="bg-yellow-900/40 px-1 rounded">
+                        pip install librosa numpy scipy
+                      </code>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {analysisResult && analysisResult.loadResult && (
                 <div className="mt-3 p-3 bg-green-900/20 border border-green-700/30 rounded-md text-xs text-green-400">
                   <strong>
-                    ✓ {analysisResult.loadResult.count} sections loaded into
-                    Architect view
+                    {analysisResult.loadResult.count} sections loaded into Architect view
                   </strong>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    Switch to the Architect tab to view them. If they don't
-                    appear, click "Refresh Blocks" in the Architect view.
+                    Switch to the Architect tab to view them. If they don't appear, click "Refresh
+                    Blocks" in the Architect view.
                   </div>
                 </div>
               )}
@@ -408,38 +400,50 @@ export default function AnalysisJobManager() {
                           </div>
                           <div>
                             Sample Rate:{' '}
-                            {analysisResult.linear_analysis.metadata
-                              ?.sample_rate || 'N/A'}{' '}
-                            Hz
+                            {analysisResult.linear_analysis.metadata?.sample_rate || 'N/A'} Hz
                           </div>
                           <div>
                             Detected Key:{' '}
-                            {analysisResult.linear_analysis.metadata
-                              ?.detected_key || 'N/A'}{' '}
-                            {analysisResult.linear_analysis.metadata
-                              ?.detected_mode || ''}
+                            {analysisResult.linear_analysis.metadata?.detected_key || 'N/A'}{' '}
+                            {analysisResult.linear_analysis.metadata?.detected_mode || ''}
                           </div>
                           <div>
                             Tempo:{' '}
-                            {analysisResult.linear_analysis.beat_grid?.tempo_bpm?.toFixed(
-                              1,
-                            ) || 'N/A'}{' '}
+                            {analysisResult.linear_analysis.beat_grid?.tempo_bpm?.toFixed(1) ||
+                              'N/A'}{' '}
                             BPM
                           </div>
                           <div>
                             Beats Detected:{' '}
-                            {analysisResult.linear_analysis.beat_grid
-                              ?.beat_timestamps?.length || 0}
+                            {analysisResult.linear_analysis.beat_grid?.beat_timestamps?.length || 0}
                           </div>
-                          <div>
-                            Events:{' '}
-                            {analysisResult.linear_analysis.events?.length || 0}
-                          </div>
+                          <div>Events: {analysisResult.linear_analysis.events?.length || 0}</div>
                           <div>
                             Chroma Frames:{' '}
-                            {analysisResult.linear_analysis.chroma_frames
-                              ?.length || 0}
+                            {analysisResult.linear_analysis.chroma_frames?.length || 0}
                           </div>
+                          {/* Analysis Quality Indicator */}
+                          {analysisResult.linear_analysis.metadata?.analysis_method && (
+                            <div className="mt-2">
+                              <strong>Analysis Method:</strong>{' '}
+                              <span
+                                className={`font-semibold ${
+                                  analysisResult.linear_analysis.metadata.analysis_quality ===
+                                  'enhanced'
+                                    ? 'text-green-600'
+                                    : analysisResult.linear_analysis.metadata.analysis_quality ===
+                                        'standard'
+                                      ? 'text-yellow-600'
+                                      : 'text-red-600'
+                                }`}
+                              >
+                                {analysisResult.linear_analysis.metadata.analysis_method
+                                  .replace('_', ' ')
+                                  .toUpperCase()}{' '}
+                                ({analysisResult.linear_analysis.metadata.analysis_quality})
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -448,14 +452,9 @@ export default function AnalysisJobManager() {
                       <div className="mb-3 text-xs text-card-foreground">
                         <strong>Structural Map:</strong>
                         <div className="ml-3 mt-1 space-y-1">
-                          <div>
-                            Sections:{' '}
-                            {analysisResult.structural_map.sections?.length ||
-                              0}
-                          </div>
+                          <div>Sections: {analysisResult.structural_map.sections?.length || 0}</div>
                           {analysisResult.structural_map.sections &&
-                            analysisResult.structural_map.sections.length >
-                              0 && (
+                            analysisResult.structural_map.sections.length > 0 && (
                               <div style={{ marginTop: '5px' }}>
                                 <strong>Section Labels:</strong>
                                 <ul
@@ -464,28 +463,19 @@ export default function AnalysisJobManager() {
                                     marginTop: '5px',
                                   }}
                                 >
-                                  {analysisResult.structural_map.sections.map(
-                                    (section, idx) => (
-                                      <li key={idx} className="text-card-foreground">
-                                        {section.section_label || 'Unknown'} (
-                                        {section.section_variant || 1})
-                                        {section.time_range && (
-                                          <span className="text-muted-foreground">
-                                            {' '}
-                                            -{' '}
-                                            {section.time_range.start_time?.toFixed(
-                                              2,
-                                            )}
-                                            s to{' '}
-                                            {section.time_range.end_time?.toFixed(
-                                              2,
-                                            )}
-                                            s
-                                          </span>
-                                        )}
-                                      </li>
-                                    ),
-                                  )}
+                                  {analysisResult.structural_map.sections.map((section, idx) => (
+                                    <li key={idx} className="text-card-foreground">
+                                      {section.section_label || 'Unknown'} (
+                                      {section.section_variant || 1})
+                                      {section.time_range && (
+                                        <span className="text-muted-foreground">
+                                          {' '}
+                                          - {section.time_range.start_time?.toFixed(2)}s to{' '}
+                                          {section.time_range.end_time?.toFixed(2)}s
+                                        </span>
+                                      )}
+                                    </li>
+                                  ))}
                                 </ul>
                               </div>
                             )}
@@ -497,14 +487,9 @@ export default function AnalysisJobManager() {
                       <div className="mb-3 text-xs text-card-foreground">
                         <strong>Arrangement Flow:</strong>
                         <div className="ml-3 mt-1 space-y-1">
+                          <div>Form: {analysisResult.arrangement_flow.form || 'N/A'}</div>
                           <div>
-                            Form:{' '}
-                            {analysisResult.arrangement_flow.form || 'N/A'}
-                          </div>
-                          <div>
-                            Timeline Items:{' '}
-                            {analysisResult.arrangement_flow.timeline?.length ||
-                              0}
+                            Timeline Items: {analysisResult.arrangement_flow.timeline?.length || 0}
                           </div>
                         </div>
                       </div>
@@ -516,28 +501,24 @@ export default function AnalysisJobManager() {
                         <div className="ml-3 mt-1 space-y-1">
                           <div>
                             Global Key:{' '}
-                            {analysisResult.harmonic_context.global_key
-                              ?.primary_key || 'N/A'}{' '}
-                            {analysisResult.harmonic_context.global_key?.mode ||
-                              ''}
+                            {analysisResult.harmonic_context.global_key?.primary_key || 'N/A'}{' '}
+                            {analysisResult.harmonic_context.global_key?.mode || ''}
                           </div>
                           <div>
                             Genre:{' '}
-                            {analysisResult.harmonic_context.genre_profile
-                              ?.detected_genre || 'N/A'}
+                            {analysisResult.harmonic_context.genre_profile?.detected_genre || 'N/A'}
                           </div>
                         </div>
                       </div>
                     )}
 
                     <div className="mt-4 p-3 bg-muted border border-border rounded-md text-xs text-muted-foreground">
-                      <strong>Note:</strong> Navigate to the "Architect" tab to
-                      view the full structural analysis and edit the song.
+                      <strong>Note:</strong> Navigate to the "Architect" tab to view the full
+                      structural analysis and edit the song.
                       {analysisResult?.loadResult?.success && (
                         <div className="mt-2 p-2 bg-green-900/20 border border-green-700/30 rounded text-green-400">
-                          ✓ {analysisResult.loadResult.count} sections have been
-                          loaded into the Architect view. Click "Refresh Blocks"
-                          if they don't appear.
+                          {analysisResult.loadResult.count} sections have been loaded into the
+                          Architect view. Click "Refresh Blocks" if they don't appear.
                         </div>
                       )}
                     </div>

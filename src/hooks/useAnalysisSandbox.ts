@@ -17,23 +17,46 @@ export function useAnalysisSandbox() {
   const grid = useMemo(() => {
     try {
       if (!songData?.linear_analysis) {
+        console.log('[useAnalysisSandbox] No linear_analysis in songData:', {
+          hasSongData: !!songData,
+          hasLinearAnalysis: !!songData?.linear_analysis,
+          fileHash: songData?.fileHash || songData?.file_hash,
+        });
         return [];
       }
+
+      console.log('[useAnalysisSandbox] Transforming grid from songData:', {
+        hasLinearAnalysis: !!songData.linear_analysis,
+        hasStructuralMap: !!songData.structural_map,
+        eventsCount: songData.linear_analysis?.events?.length || 0,
+        sectionsCount: songData.structural_map?.sections?.length || 0,
+      });
+
       // Use new transformer with Stable Core logic - pass full analysis data
       const sections = transformAnalysisToGrid(songData);
+
       // Flatten sections to get all measures
       if (!Array.isArray(sections)) {
+        console.warn('[useAnalysisSandbox] transformAnalysisToGrid returned non-array:', sections);
         return [];
       }
+
       const measures: any[] = [];
       sections.forEach((section: any) => {
         if (section?.measures && Array.isArray(section.measures)) {
           measures.push(...section.measures);
         }
       });
+
+      console.log('[useAnalysisSandbox] Grid computed:', {
+        sectionsCount: sections.length,
+        measuresCount: measures.length,
+        beatsCount: measures.reduce((sum, m) => sum + (m?.beats?.length || 0), 0),
+      });
+
       return measures;
     } catch (error) {
-      console.error('[useAnalysisSandbox] Error transforming grid:', error);
+      console.error('[useAnalysisSandbox] ❌ Error transforming grid:', error);
       return [];
     }
   }, [songData]);
@@ -48,12 +71,12 @@ export function useAnalysisSandbox() {
       for (let i = 0; i < sectionMeasures.length; i += 4) {
         const phrase = sectionMeasures.slice(i, i + 4);
         if (phrase.length > 0) {
-          progressions.push({ 
-            section_id: section.section_id, 
-            startBar: phrase[0].index, 
-            length: phrase.length, 
-            measures: phrase, 
-            label: `Phrase ${phrase[0].index}` 
+          progressions.push({
+            section_id: section.section_id,
+            startBar: phrase[0].index,
+            length: phrase.length,
+            measures: phrase,
+            label: `Phrase ${phrase[0].index}`,
           });
         }
       }
@@ -62,8 +85,8 @@ export function useAnalysisSandbox() {
   }
 
   const progressionGroups = useMemo(
-    () => detectProgressions(grid, songData?.structural_map?.sections || []), 
-    [grid, songData?.structural_map]
+    () => detectProgressions(grid, songData?.structural_map?.sections || []),
+    [grid, songData?.structural_map],
   );
 
   return {
@@ -76,6 +99,7 @@ export function useAnalysisSandbox() {
     actions: {
       updateKey: actions.updateKey,
       updateChord: actions.updateChord,
+      updateBeat: actions.updateBeat,
       updateSection: actions.updateSection,
       saveChanges: actions.saveChanges,
     },

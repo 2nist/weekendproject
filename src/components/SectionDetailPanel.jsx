@@ -152,7 +152,7 @@ export default function SectionDetailPanel({ section, onClose }) {
             {rhythmic_dna?.pulse_pattern && (
               <div style={{ marginTop: '15px' }}>
                 <strong>Visual Pattern:</strong>
-                <div style={{ fontFamily: 'monospace', fontSize: '18px', marginTop: '5px' }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', marginTop: '5px' }}>
                   {rhythmic_dna.pulse_pattern.map((num, idx) => (
                     <span key={idx} style={{ marginRight: '5px' }}>
                       {Array(num).fill('•').join('')}

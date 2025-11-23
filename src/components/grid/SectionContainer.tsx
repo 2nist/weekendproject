@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { Section, BeatNode, ProgressionGroup } from '../../types/audio';
 import { Measure as MeasureComponent } from './Measure';
 import { BeatCard } from './BeatCard';
 import { ProgressionBracket } from './ProgressionBracket';
 import { cva } from 'class-variance-authority';
-import { cn } from '@/lib/utils';
+import { cn } from '../../lib/utils';
+import { SmartContextMenu } from '../ui/SmartContextMenu';
+import { useEditor } from '../../contexts/EditorContext';
 
 interface SectionContainerProps {
   section?: Section;
@@ -33,20 +35,17 @@ const colorMap: Record<string, string> = {
   gray: 'border-border bg-muted/30',
 };
 
-const sectionVariants = cva(
-  'relative p-6 rounded-3xl border-2 border-dashed transition-all',
-  {
-    variants: {
-      type: {
-        verse: 'border-primary/30 bg-primary/5',
-        chorus: 'border-music-diminished/30 bg-music-diminished/5',
-        bridge: 'border-accent/30 bg-accent/5',
-        default: 'border-border bg-muted/30',
-      },
+const sectionVariants = cva('relative p-6 rounded-3xl border-2 border-dashed transition-all', {
+  variants: {
+    type: {
+      verse: 'border-primary/30 bg-primary/5',
+      chorus: 'border-music-diminished/30 bg-music-diminished/5',
+      bridge: 'border-accent/30 bg-accent/5',
+      default: 'border-border bg-muted/30',
     },
-    defaultVariants: { type: 'default' },
   },
-);
+  defaultVariants: { type: 'default' },
+});
 
 export const SectionContainer: React.FC<SectionContainerProps> = ({
   section,
@@ -62,6 +61,47 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
   onProgressionEdit,
   'data-section-id': dataSectionId,
 }) => {
+  const { state } = useEditor();
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  // Calculate which beat is currently active based on playback time
+  const getActiveBeatId = () => {
+    if (!state.isPlaying || !section?.measures) return null;
+
+    const currentTime = state.playbackTime;
+
+    // Find the beat that contains the current playback time
+    for (const measure of section.measures) {
+      for (const beat of measure.beats) {
+        const beatStart = beat.timestamp;
+        const nextBeat = measure.beats[measure.beats.indexOf(beat) + 1];
+        const beatEnd = nextBeat ? nextBeat.timestamp : beatStart + 0.5; // Default 0.5s duration
+
+        if (currentTime >= beatStart && currentTime < beatEnd) {
+          return beat.id;
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const activeBeatId = getActiveBeatId();
+
+  // Auto-scroll active beat into view
+  useEffect(() => {
+    if (activeBeatId && state.isPlaying) {
+      const activeElement = document.querySelector(`[data-beat-id="${activeBeatId}"]`);
+      if (activeElement) {
+        activeElement.scrollIntoView({
+          behavior: 'smooth',
+          block: 'nearest',
+          inline: 'center',
+        });
+      }
+    }
+  }, [activeBeatId, state.isPlaying]);
+
   // Simple wrapper mode (label/type/children)
   if (label !== undefined || type !== undefined || children !== undefined) {
     const labelLower = (type || label || '').toLowerCase();
@@ -80,9 +120,7 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
         data-section-id={dataSectionId}
       >
         <div className="mb-4">
-          <h3 className="text-lg font-bold text-foreground uppercase tracking-wider">
-            {label}
-          </h3>
+          <h3 className="text-lg font-bold text-foreground uppercase tracking-wider">{label}</h3>
         </div>
         {children}
       </div>
@@ -92,7 +130,6 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
   // Full section mode (section prop)
   if (!section) return null;
 
-  const [isExpanded, setIsExpanded] = useState(true);
   const sectionColor = section.color || 'gray';
   const borderColor = colorMap[sectionColor] || colorMap.gray;
   const labelLower = (section.label || '').toLowerCase();
@@ -131,52 +168,49 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
 
   return (
     <div
-      className={cn(
-        sectionVariants({ type: sectionType }),
-        borderColor,
-        'p-4 mb-6',
-      )}
+      className={cn(sectionVariants({ type: sectionType }), borderColor, 'p-4 mb-6')}
       data-section-id={dataSectionId || section?.id}
     >
       {/* Section Header */}
-      <button
-        type="button"
-        className="flex items-center justify-between mb-4 cursor-pointer hover:bg-muted/50 p-2 rounded transition-colors"
-        onClick={handleHeaderClick}
-        aria-label={`Toggle ${section.label}`}
-      >
-        <div className="flex items-center gap-3">
-          <span className="text-lg font-bold text-foreground uppercase tracking-wider">
-            {section.label}
-          </span>
-          <span className="text-sm text-muted-foreground">
-            ({section.measures.length}{' '}
-            {section.measures.length === 1 ? 'Bar' : 'Bars'})
-          </span>
-        </div>
+      <SmartContextMenu menuType="section" entityId={section.id} data={section}>
+        <button
+          type="button"
+          className="flex items-center justify-between mb-4 cursor-pointer hover:bg-muted/50 p-2 rounded transition-colors w-full"
+          onClick={handleHeaderClick}
+          aria-label={`Toggle ${section.label}`}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-lg font-bold text-foreground uppercase tracking-wider">
+              {section.label}
+            </span>
+            <span className="text-sm text-muted-foreground">
+              ({section.measures.length} {section.measures.length === 1 ? 'Bar' : 'Bars'})
+            </span>
+          </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleEdit}
-            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted transition-colors"
-            title="Edit section"
-            aria-label="Edit section"
-            type="button"
-          >
-            ✏️ Edit
-          </button>
-          <button
-            onClick={handleClone}
-            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted transition-colors"
-            title="Clone section"
-            aria-label="Clone section"
-            type="button"
-          >
-            📋 Clone
-          </button>
-          <span className="text-muted-foreground">{isExpanded ? '▼' : '▶'}</span>
-        </div>
-      </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleEdit}
+              className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted transition-colors"
+              title="Edit section"
+              aria-label="Edit section"
+              type="button"
+            >
+              Edit
+            </button>
+            <button
+              onClick={handleClone}
+              className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted transition-colors"
+              title="Clone section"
+              aria-label="Clone section"
+              type="button"
+            >
+              Clone
+            </button>
+            <span className="text-muted-foreground">{isExpanded ? '▼' : '▶'}</span>
+          </div>
+        </button>
+      </SmartContextMenu>
 
       {/* Measures Grid */}
       {isExpanded && (
@@ -208,26 +242,28 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
                     else if (/\bV\b/.test(label)) harmonicVariant = 'dominant';
                     else if (/\bIV\b|\bII\b|subdominant/i.test(label))
                       harmonicVariant = 'subdominant';
-                    else if (/vii|°|dim/i.test(label))
-                      harmonicVariant = 'diminished';
+                    else if (/vii|°|dim/i.test(label)) harmonicVariant = 'diminished';
                     else harmonicVariant = 'default';
                   }
                   const isKick = !!beat.drums?.hasKick;
                   const isSnare = !!beat.drums?.hasSnare;
                   return (
-                    <BeatCard
-                      key={beat.id}
-                      chord={beat.chordLabel}
-                      roman={beat.functionLabel}
-                      function={harmonicVariant}
-                      selected={beat.isSelected}
-                      isKick={isKick}
-                      isSnare={isSnare}
-                      beatIndex={beat.beatIndex}
-                      isAttack={beat.isAttack}
-                      isSustain={beat.isSustain}
-                      onEdit={() => onBeatClick?.(beat as any)}
-                    />
+                    <SmartContextMenu key={beat.id} menuType="beat" entityId={beat.id} data={beat}>
+                      <BeatCard
+                        data-beat-id={beat.id}
+                        chord={beat.chordLabel}
+                        roman={beat.functionLabel}
+                        function={harmonicVariant}
+                        selected={beat.isSelected}
+                        isKick={isKick}
+                        isSnare={isSnare}
+                        beatIndex={beat.beatIndex}
+                        isAttack={beat.isAttack}
+                        isSustain={beat.isSustain}
+                        isActive={beat.id === activeBeatId}
+                        onEdit={() => onBeatClick?.(beat)}
+                      />
+                    </SmartContextMenu>
                   );
                 })}
               </MeasureComponent>
@@ -238,5 +274,3 @@ export const SectionContainer: React.FC<SectionContainerProps> = ({
     </div>
   );
 };
-
-

@@ -23,18 +23,18 @@ class TestResults {
 
   pass(testName, details = '') {
     this.passed.push({ test: testName, details });
-    console.log(`✓ PASS: ${testName}${details ? ` - ${details}` : ''}`);
+    console.log(`PASS: ${testName}${details ? ` - ${details}` : ''}`);
   }
 
   fail(testName, error, details = '') {
     this.failed.push({ test: testName, error: error.message || error, details });
-    console.error(`✗ FAIL: ${testName}${details ? ` - ${details}` : ''}`);
+    console.error(`FAIL: ${testName}${details ? ` - ${details}` : ''}`);
     if (error.message) console.error(`  Error: ${error.message}`);
   }
 
   warn(testName, message) {
     this.warnings.push({ test: testName, message });
-    console.warn(`⚠ WARN: ${testName} - ${message}`);
+    console.warn(`WARN: ${testName} - ${message}`);
   }
 
   summary() {
@@ -536,10 +536,10 @@ async function runAllTests() {
     
     console.log('\n' + '='.repeat(60));
     if (summary.success) {
-      console.log('✅ ALL CRITICAL TESTS PASSED');
+      console.log('ALL CRITICAL TESTS PASSED');
       console.log('The analysis pipeline is ready for production use.');
     } else {
-      console.log('❌ SOME TESTS FAILED');
+      console.log('SOME TESTS FAILED');
       console.log('Please review failed tests before deploying.');
     }
     console.log('='.repeat(60));

@@ -242,19 +242,19 @@ async function testAnalysisAccuracy(audioFile, labFile) {
 
   // Check files exist
   if (!fs.existsSync(audioFile)) {
-    console.error(`✗ Audio file not found: ${audioFile}`);
+    console.error(`Audio file not found: ${audioFile}`);
     return null;
   }
 
   if (!fs.existsSync(labFile)) {
-    console.error(`✗ Lab file not found: ${labFile}`);
+    console.error(`Lab file not found: ${labFile}`);
     return null;
   }
 
   // Parse ground truth
   console.log('1. Parsing ground truth (.lab file)...');
   const groundTruth = parseLabFile(labFile);
-  console.log(`   ✓ Found ${groundTruth.length} chord annotations`);
+  console.log(`   Found ${groundTruth.length} chord annotations`);
   console.log(`   Duration: ${groundTruth[groundTruth.length - 1]?.endTime || 0}s`);
 
   // Run analysis
@@ -268,11 +268,11 @@ async function testAnalysisAccuracy(audioFile, labFile) {
       }
     });
   } catch (error) {
-    console.error(`\n   ✗ Analysis failed: ${error.message}`);
+    console.error(`\n   Analysis failed: ${error.message}`);
     return null;
   }
   const analysisTime = Date.now() - startTime;
-  console.log(`\n   ✓ Analysis complete in ${(analysisTime / 1000).toFixed(2)}s`);
+  console.log(`\n   Analysis complete in ${(analysisTime / 1000).toFixed(2)}s`);
 
   // Extract chord events
   console.log('\n3. Extracting chord events...');
@@ -281,7 +281,7 @@ async function testAnalysisAccuracy(audioFile, labFile) {
     .map(extractChordFromEvent)
     .filter((c) => c !== null);
 
-  console.log(`   ✓ Found ${chordEvents.length} chord detections`);
+  console.log(`   Found ${chordEvents.length} chord detections`);
 
   // Compare results
   console.log('\n4. Comparing with ground truth...');
@@ -346,7 +346,7 @@ async function runTests() {
         });
       }
     } else {
-      console.log(`\n⚠ Skipping ${path.basename(test.audio)} (files not found)`);
+      console.log(`\nSkipping ${path.basename(test.audio)} (files not found)`);
     }
   }
 
@@ -366,7 +366,7 @@ async function runTests() {
     });
   }
 
-  console.log('\n✅ Test suite complete\n');
+  console.log('\nTest suite complete\n');
 }
 
 // Run tests

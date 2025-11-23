@@ -29,7 +29,7 @@ export default function ProbabilityDashboard({ analysis }) {
         color: 'white',
         width: '320px',
         borderLeft: '1px solid #1e293b',
-        fontFamily: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+        fontFamily: 'var(--font-sans)',
       }}
     >
       <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '16px' }}>
@@ -39,7 +39,7 @@ export default function ProbabilityDashboard({ analysis }) {
       <section style={{ marginBottom: '24px' }}>
         <label style={labelStyle}>Detected Key</label>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-          <span style={{ fontSize: '2rem', fontFamily: 'monospace', color: '#34d399' }}>
+          <span style={{ fontSize: '2rem', fontFamily: 'var(--font-mono)', color: '#34d399' }}>
             {globalKey.primary_key || 'Unknown'}
           </span>
           <span style={{ fontSize: '0.9rem' }}>{Math.round(keyConfidence * 100)}%</span>

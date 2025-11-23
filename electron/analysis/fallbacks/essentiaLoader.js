@@ -36,11 +36,12 @@ function loadEssentia() {
  */
 async function getEssentiaInstance() {
   if (isEssentiaLoaded && essentiaInstance) {
+    console.log('[EssentiaLoader] Using cached Essentia instance');
     return essentiaInstance;
   }
 
   try {
-    console.log('Initializing Essentia...');
+    console.log('[EssentiaLoader] Initializing Essentia.js...');
     const { EssentiaWASM, EssentiaFactory } = loadEssentia();
 
     let wasmModule = EssentiaWASM;
@@ -66,10 +67,15 @@ async function getEssentiaInstance() {
     essentiaInstance = new EssentiaFactory(wasmModule);
     isEssentiaLoaded = true;
 
-    console.log(`Essentia.js initialized (v${essentiaInstance?.version || EssentiaVersion})`);
+    console.log(`[EssentiaLoader] ✅ Essentia.js initialized (v${essentiaInstance?.version || EssentiaVersion})`);
     return essentiaInstance;
   } catch (error) {
-    console.error('CRITICAL: Failed to load Essentia.js:', error.message);
+    console.error('[EssentiaLoader] ❌ CRITICAL: Failed to load Essentia.js:', error.message);
+    console.error('[EssentiaLoader] Error stack:', error.stack);
+    console.error('[EssentiaLoader] This may be due to:');
+    console.error('[EssentiaLoader]   - Missing essentia.js package: npm install essentia.js');
+    console.error('[EssentiaLoader]   - WASM file not found or corrupted');
+    console.error('[EssentiaLoader]   - Electron context isolation issues');
     return null;
   }
 }

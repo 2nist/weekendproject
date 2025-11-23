@@ -35,17 +35,11 @@ try {
     const CA2 = require('./chordAnalyzer');
     ChordAnalyzer = CA2 && CA2.default ? CA2.default : CA2;
   } catch (err2) {
-    logger.warn(
-      'ChordAnalyzer not loaded; TS analyzer disabled',
-      err2?.message || err?.message,
-    );
+    logger.warn('ChordAnalyzer not loaded; TS analyzer disabled', err2?.message || err?.message);
     ChordAnalyzer = null;
   }
 }
-logger.debug(
-  '[ChordAnalyzer] status:',
-  ChordAnalyzer ? 'loaded' : 'unavailable',
-);
+logger.debug('[ChordAnalyzer] status:', ChordAnalyzer ? 'loaded' : 'unavailable');
 
 // Helper: run the TypeScript ChordAnalyzer on a linear_analysis object
 function runTypeScriptChordAnalyzer(linearAnalysis, opts = {}, structuralMap = null) {
@@ -68,10 +62,7 @@ function runTypeScriptChordAnalyzer(linearAnalysis, opts = {}, structuralMap = n
     };
     // Merge provided opts with defaults
     const mergedOpts = { ...detectOpts, ...(opts || {}) };
-    const beatLabels = analyzerInstance.detectChords(
-      linearAnalysis,
-      mergedOpts,
-    );
+    const beatLabels = analyzerInstance.detectChords(linearAnalysis, mergedOpts);
     logger.debug('[ChordAnalyzer] detection result:', {
       chromaFrames: linearAnalysis?.chroma_frames?.length || 0,
       beatTimestamps: linearAnalysis?.beat_grid?.beat_timestamps?.length || 0,
@@ -84,10 +75,7 @@ function runTypeScriptChordAnalyzer(linearAnalysis, opts = {}, structuralMap = n
       );
       const postCleanCount = preservedEvents.length;
       logger.debug('[ChordAnalyzer] Pre-Merge Event Count:', preMergeCount);
-      logger.debug(
-        '[ChordAnalyzer] Post-Clean Event Count (chords removed):',
-        postCleanCount,
-      );
+      logger.debug('[ChordAnalyzer] Post-Clean Event Count (chords removed):', postCleanCount);
       const newChordEvents = beatLabels.map((b, idx) => {
         const duration =
           idx + 1 < beatLabels.length
@@ -98,9 +86,7 @@ function runTypeScriptChordAnalyzer(linearAnalysis, opts = {}, structuralMap = n
           event_type: 'chord_candidate',
           chord: b.chord || null,
           chord_candidate: {
-            root_candidates: [
-              { root: b.chord || 'N', probability: b.confidence || 1 },
-            ],
+            root_candidates: [{ root: b.chord || 'N', probability: b.confidence || 1 }],
             quality_candidates: [],
           },
           confidence: b.confidence || 0,
@@ -112,10 +98,7 @@ function runTypeScriptChordAnalyzer(linearAnalysis, opts = {}, structuralMap = n
       logger.pass1(
         `[ChordAnalyzer] Merged ${newChordEvents.length} chord events, preserved ${preservedEvents.length} non-chord events.`,
       );
-      logger.debug(
-        '[ChordAnalyzer] Final Event Count:',
-        linearAnalysis.events.length,
-      );
+      logger.debug('[ChordAnalyzer] Final Event Count:', linearAnalysis.events.length);
     }
   } catch (err) {
     logger.warn('TS ChordAnalyzer invocation failed:', err?.message || err);
@@ -126,8 +109,7 @@ function runTypeScriptChordAnalyzer(linearAnalysis, opts = {}, structuralMap = n
 // Exported helper for recalculating chords for existing linear_analysis objects
 function recalcChords(linearAnalysis, opts = {}) {
   // Return a shallow clone of the linear analysis with new chord events
-  if (!linearAnalysis)
-    return { success: false, error: 'Missing linear analysis' };
+  if (!linearAnalysis) return { success: false, error: 'Missing linear analysis' };
   try {
     const copy = JSON.parse(JSON.stringify(linearAnalysis));
     // Extract structuralMap from opts if provided
@@ -191,26 +173,31 @@ async function analyzeAudio(
 
   // 2. Try Python analysis via bridge first
   try {
+    logger.pass1('[Listener] Checking for Python+Librosa...');
     const pythonAvailable = await pythonEssentia.checkPythonEssentia();
     if (pythonAvailable) {
+      logger.pass1('[Listener] ✅ Python+Librosa detected, using for analysis');
       progressCallback(20);
       try {
-        const result = await pythonEssentia.analyzeAudioWithPython(
-          filePath,
-          (p) => progressCallback(20 + p * 0.8),
+        const result = await pythonEssentia.analyzeAudioWithPython(filePath, (p) =>
+          progressCallback(20 + p * 0.8),
         );
         if (result && result.source === 'python_librosa') {
-          logger.pass1(
-            '✅ SUCCESS: Using Python+Librosa backend. No WASM memory limits!',
-          );
+          logger.pass1('✅ SUCCESS: Using Python+Librosa backend. No WASM memory limits!');
         } else if (result) {
           logger.warn('⚠️ WARNING: Python returned but missing source tag.');
         }
         if (result && (result.linear_analysis || result)) {
           const output = result.linear_analysis || result;
+          // Add analysis method tracking
+          output.metadata = output.metadata || {};
+          output.metadata.analysis_method = 'python_librosa';
+          output.metadata.analysis_quality = 'enhanced';
+          output.metadata.fallback_used = false;
           // Run TypeScript ChordAnalyzer to generate beat-sync chord labels
           // Use harmony options if provided (from Analysis Lab)
-          const harmonyOpts = harmonyOptions && Object.keys(harmonyOptions).length > 0 ? harmonyOptions : {};
+          const harmonyOpts =
+            harmonyOptions && Object.keys(harmonyOptions).length > 0 ? harmonyOptions : {};
           try {
             runTypeScriptChordAnalyzer(output, harmonyOpts);
           } catch (ex) {
@@ -218,19 +205,39 @@ async function analyzeAudio(
           }
           try {
             const sr = output?.metadata?.sample_rate;
-            const fh =
-              output?.metadata?.frame_hop_seconds ||
-              output?.metadata?.hop_length / sr;
-            const beatsCount = (output?.beat_grid?.beat_timestamps || [])
-              .length;
+            const fh = output?.metadata?.frame_hop_seconds || output?.metadata?.hop_length / sr;
+            const beatsCount = (output?.beat_grid?.beat_timestamps || []).length;
+            const key = output?.metadata?.detected_key || 'unknown';
+            const mode = output?.metadata?.detected_mode || 'unknown';
+            const keyConf = output?.metadata?.key_confidence || 0;
+            const timeSig = output?.beat_grid?.time_signature || 'unknown';
+            const downbeats = output?.beat_grid?.downbeat_timestamps?.length || 0;
+            const onsets = output?.onsets?.length || 0;
+            const hasSpectral = !!output?.spectral_features;
+            const hasTonnetz = !!output?.tonnetz_features;
+
+            logger.pass1(
+              `[Analyzer] Python analysis complete: Key=${key} ${mode} (${Math.round(keyConf * 100)}%), TimeSig=${timeSig}, Beats=${beatsCount}, Downbeats=${downbeats}, Onsets=${onsets}`,
+            );
+            if (hasSpectral) logger.debug('[Analyzer] ✅ Spectral features extracted');
+            if (hasTonnetz) logger.debug('[Analyzer] ✅ Tonnetz features extracted');
             logger.debug(
               `[Analyzer] Python linear_analysis: sr=${sr} frame_hop_s=${fh} beats=${beatsCount} source=${result.source || 'python'} file=${filePath}`,
             );
           } catch (e) {
             // Swallow logging errors
           }
-          if (metadataOverrides)
+          // Log detected values BEFORE overrides
+          logger.pass1(
+            `[Analyzer] BEFORE overrides - Key: ${output?.metadata?.detected_key || 'NOT SET'}, Mode: ${output?.metadata?.detected_mode || 'NOT SET'}, TimeSig: ${output?.beat_grid?.time_signature || 'NOT SET'}`,
+          );
+          if (metadataOverrides) {
+            logger.debug('[Analyzer] Applying metadata overrides:', Object.keys(metadataOverrides));
             applyMetadataOverrides(output, metadataOverrides);
+            logger.pass1(
+              `[Analyzer] AFTER overrides - Key: ${output?.metadata?.detected_key || 'NOT SET'}, Mode: ${output?.metadata?.detected_mode || 'NOT SET'}, TimeSig: ${output?.beat_grid?.time_signature || 'NOT SET'}`,
+            );
+          }
           // Store harmony options in metadataOverrides for chord analyzer
           if (harmonyOptions && Object.keys(harmonyOptions).length > 0) {
             output.metadata = output.metadata || {};
@@ -240,24 +247,28 @@ async function analyzeAudio(
           return { fileHash, linear_analysis: output };
         }
       } catch (err) {
-        logger.warn('Python analysis failed:', err.message);
+        logger.warn('[Listener] Python analysis failed:', err.message);
+        logger.warn('[Listener] Error details:', err.stack);
       }
     } else {
-      logger.warn(
-        '❌ Python not found in system PATH. Falling back to legacy JS (High Crash Risk).',
-      );
+      logger.warn('❌ Python+Librosa not available. Checking for Essentia.js...');
     }
   } catch (err) {
-    logger.error('Error checking Python availability:', err.message);
+    logger.error('[Listener] Error checking Python availability:', err.message);
   }
 
   // Continue to fallback chain (Essentia.js and simple analyzer)
 
   // Fallback: Try JavaScript Essentia.js (browser-based, may not work in main process)
   try {
+    logger.pass1('[Listener] Attempting to load Essentia.js...');
     const essentia = await getEssentia();
     if (essentia) {
-      logger.pass1('Using JavaScript Essentia.js for analysis');
+      logger.pass1('✅ Using JavaScript Essentia.js for analysis');
+      logger.warn(
+        '⚠️ FALLBACK ALERT: Using Essentia.js instead of enhanced Python+Librosa analysis. Analysis quality may be reduced.',
+      );
+      logger.warn('⚠️ To enable enhanced analysis, install: pip install librosa numpy scipy');
 
       // Prepare audio file
       let audioPathToAnalyze = filePath;
@@ -292,9 +303,7 @@ async function analyzeAudio(
         // Only apply if audio is below 90% of full scale to avoid over-amplification
         if (maxVal < 0.9) {
           const scale = 0.9 / maxVal; // Scale to 90% to leave headroom
-          logger.debug(
-            `Normalizing audio: peak=${maxVal.toFixed(6)}, scale=${scale.toFixed(2)}`,
-          );
+          logger.debug(`Normalizing audio: peak=${maxVal.toFixed(6)}, scale=${scale.toFixed(2)}`);
           for (let i = 0; i < samples.length; i++) {
             samples[i] *= scale;
           }
@@ -320,25 +329,38 @@ async function analyzeAudio(
       applyMetadataOverrides(processed.linear_analysis, metadataOverrides);
       // Re-run TS ChordAnalyzer on Essentia.js results (overwrite raw events)
       // Use harmony options if provided (from Analysis Lab)
-      const harmonyOpts = harmonyOptions && Object.keys(harmonyOptions).length > 0 ? harmonyOptions : {};
+      const harmonyOpts =
+        harmonyOptions && Object.keys(harmonyOptions).length > 0 ? harmonyOptions : {};
       try {
         runTypeScriptChordAnalyzer(processed.linear_analysis, harmonyOpts);
       } catch (e) {
-        logger.warn(
-          'TS ChordAnalyzer on Essentia result failed',
-          e?.message || e,
-        );
+        logger.warn('TS ChordAnalyzer on Essentia result failed', e?.message || e);
       }
+      // Add fallback tracking for Essentia.js
+      processed.linear_analysis.metadata = processed.linear_analysis.metadata || {};
+      processed.linear_analysis.metadata.analysis_method = 'essentia_js';
+      processed.linear_analysis.metadata.analysis_quality = 'standard';
+      processed.linear_analysis.metadata.fallback_used = true;
+      processed.linear_analysis.metadata.fallback_reason = 'python_librosa_unavailable';
       return processed;
+    } else {
+      logger.warn('[Listener] Essentia.js failed to initialize');
     }
   } catch (error) {
-    logger.warn('JavaScript Essentia.js failed:', error.message);
+    logger.warn('[Listener] JavaScript Essentia.js failed:', error.message);
+    logger.warn('[Listener] Error details:', error.stack);
   }
 
   // Final fallback: Use simple audio analyzer (no Essentia required)
-  logger.pass1(
-    'No Essentia available. Using simple audio analyzer (basic DSP algorithms).',
+  logger.warn(
+    '⚠️ WARNING: No Essentia/Librosa available. Using simple audio analyzer (basic DSP algorithms).',
   );
+  logger.warn(
+    '⚠️ FALLBACK ALERT: Using basic analyzer. Analysis quality is significantly reduced.',
+  );
+  logger.warn('⚠️ For better results, install:');
+  logger.warn('   - Python + Librosa: pip install librosa numpy scipy');
+  logger.warn('   - Or ensure essentia.js is properly installed: npm install essentia.js');
   progressCallback(20);
 
   try {
@@ -373,15 +395,12 @@ async function analyzeAudio(
     progressCallback(30);
 
     // Use simple analyzer
-    const result = await simpleAnalyzer.analyzeAudioSimple(
-      audioPathToAnalyze,
-      (progress) => {
-        // Scale simple analyzer progress to 30-100% range
-        const scaledProgress = 30 + progress * 0.7;
-        progressCallback(scaledProgress);
-        logger.pass1(`Analysis progress: ${Math.round(scaledProgress)}%`);
-      },
-    );
+    const result = await simpleAnalyzer.analyzeAudioSimple(audioPathToAnalyze, (progress) => {
+      // Scale simple analyzer progress to 30-100% range
+      const scaledProgress = 30 + progress * 0.7;
+      progressCallback(scaledProgress);
+      logger.pass1(`Analysis progress: ${Math.round(scaledProgress)}%`);
+    });
 
     logger.pass1('Simple audio analysis complete');
 
@@ -393,12 +412,19 @@ async function analyzeAudio(
     progressCallback(100);
     applyMetadataOverrides(result.linear_analysis, metadataOverrides);
     // Use harmony options if provided (from Analysis Lab)
-    const harmonyOpts = harmonyOptions && Object.keys(harmonyOptions).length > 0 ? harmonyOptions : {};
+    const harmonyOpts =
+      harmonyOptions && Object.keys(harmonyOptions).length > 0 ? harmonyOptions : {};
     try {
       runTypeScriptChordAnalyzer(result.linear_analysis, harmonyOpts);
     } catch (e) {
       logger.warn('TS ChordAnalyzer on Simple result failed', e?.message || e);
     }
+    // Add fallback tracking for simple analyzer
+    result.linear_analysis.metadata = result.linear_analysis.metadata || {};
+    result.linear_analysis.metadata.analysis_method = 'simple_analyzer';
+    result.linear_analysis.metadata.analysis_quality = 'basic';
+    result.linear_analysis.metadata.fallback_used = true;
+    result.linear_analysis.metadata.fallback_reason = 'essentia_js_failed';
     return {
       fileHash,
       linear_analysis: result.linear_analysis,
@@ -406,9 +432,7 @@ async function analyzeAudio(
   } catch (error) {
     logger.error('Simple audio analyzer failed:', error);
     // Last resort: Return placeholder
-    logger.warn(
-      'All analysis methods failed. Returning placeholder structure.',
-    );
+    logger.warn('All analysis methods failed. Returning placeholder structure.');
     progressCallback(50);
 
     const placeholder = {
@@ -437,6 +461,11 @@ async function analyzeAudio(
       },
     };
     applyMetadataOverrides(placeholder.linear_analysis, metadataOverrides);
+    // Add fallback tracking for placeholder
+    placeholder.linear_analysis.metadata.analysis_method = 'placeholder';
+    placeholder.linear_analysis.metadata.analysis_quality = 'minimal';
+    placeholder.linear_analysis.metadata.fallback_used = true;
+    placeholder.linear_analysis.metadata.fallback_reason = 'all_methods_failed';
     return placeholder;
   }
 }
@@ -497,9 +526,7 @@ async function processWithEssentiaJS(
     }
 
     if (hasInvalid) {
-      logger.warn(
-        'Audio samples contained invalid values (NaN/Infinity), clamped to 0',
-      );
+      logger.warn('Audio samples contained invalid values (NaN/Infinity), clamped to 0');
     }
 
     // Process in smaller chunks (30 seconds max per chunk) to avoid memory issues
@@ -617,20 +644,14 @@ async function processWithEssentiaJS(
             if (ticksVector) {
               if (Array.isArray(ticksVector)) {
                 ticks = ticksVector;
-              } else if (
-                typeof ticksVector === 'object' &&
-                essentia.vectorToArray
-              ) {
+              } else if (typeof ticksVector === 'object' && essentia.vectorToArray) {
                 ticks = essentia.vectorToArray(ticksVector);
               } else {
                 ticks = Array.from(ticksVector || []);
               }
 
               // Validate ticks
-              if (
-                ticks.length > 0 &&
-                ticks.every((t) => typeof t === 'number' && isFinite(t))
-              ) {
+              if (ticks.length > 0 && ticks.every((t) => typeof t === 'number' && isFinite(t))) {
                 // Adjust tick timestamps by chunk offset
                 const adjustedTicks = ticks.map((tick) => tick + chunk.offset);
                 beatTimestamps.push(...adjustedTicks);
@@ -640,14 +661,10 @@ async function processWithEssentiaJS(
                 );
                 chunkSuccess = true;
               } else {
-                logger.warn(
-                  `Invalid ticks from ${algo.name} for chunk ${chunkIdx + 1}`,
-                );
+                logger.warn(`Invalid ticks from ${algo.name} for chunk ${chunkIdx + 1}`);
               }
             } else {
-              logger.warn(
-                `No ticks found in ${algo.name} result for chunk ${chunkIdx + 1}`,
-              );
+              logger.warn(`No ticks found in ${algo.name} result for chunk ${chunkIdx + 1}`);
             }
           } catch (extractError) {
             logger.warn(
@@ -656,11 +673,7 @@ async function processWithEssentiaJS(
             );
           } finally {
             // 🧹 MEMORY CLEANUP: Delete the ticks vector if it was created
-            if (
-              ticksVector &&
-              ticksVector.delete &&
-              typeof ticksVector.delete === 'function'
-            ) {
+            if (ticksVector && ticksVector.delete && typeof ticksVector.delete === 'function') {
               try {
                 ticksVector.delete();
               } catch (e) {
@@ -674,10 +687,7 @@ async function processWithEssentiaJS(
           const errorMsg = error.message || String(error);
           // Don't log "abort" errors for every algorithm, just note which one failed
           if (!errorMsg.includes('abort') && !errorMsg.includes('emval')) {
-            logger.warn(
-              `${algo.name} failed for chunk ${chunkIdx + 1}:`,
-              errorMsg,
-            );
+            logger.warn(`${algo.name} failed for chunk ${chunkIdx + 1}:`, errorMsg);
           }
 
           // Clean up vector before trying next algorithm
@@ -702,9 +712,7 @@ async function processWithEssentiaJS(
       }
 
       if (!chunkSuccess) {
-        logger.warn(
-          `All beat tracking algorithms failed for chunk ${chunkIdx + 1}`,
-        );
+        logger.warn(`All beat tracking algorithms failed for chunk ${chunkIdx + 1}`);
       }
     }
 
@@ -712,10 +720,7 @@ async function processWithEssentiaJS(
     beatTimestamps.sort((a, b) => a - b);
     const uniqueBeats = [];
     for (let i = 0; i < beatTimestamps.length; i++) {
-      if (
-        i === 0 ||
-        Math.abs(beatTimestamps[i] - beatTimestamps[i - 1]) > 0.01
-      ) {
+      if (i === 0 || Math.abs(beatTimestamps[i] - beatTimestamps[i - 1]) > 0.01) {
         uniqueBeats.push(beatTimestamps[i]);
       }
     }
@@ -768,10 +773,7 @@ async function processWithEssentiaJS(
       logger.warn('Essentia DSP algorithms not available, will use fallback');
     }
   } catch (initError) {
-    logger.warn(
-      'Failed to initialize Essentia DSP pipeline:',
-      initError.message,
-    );
+    logger.warn('Failed to initialize Essentia DSP pipeline:', initError.message);
   }
 
   // Create the main audio vector once
@@ -886,8 +888,7 @@ async function processWithEssentiaJS(
           let peaksSize = 0;
           try {
             if (peaks.frequencies.size) peaksSize = peaks.frequencies.size();
-            else if (peaks.frequencies.length)
-              peaksSize = peaks.frequencies.length;
+            else if (peaks.frequencies.length) peaksSize = peaks.frequencies.length;
           } catch (e) {
             peaksSize = 1;
           }
@@ -895,10 +896,7 @@ async function processWithEssentiaJS(
           if (peaksSize < 3) {
             chromaVector = new Array(12).fill(0);
           } else {
-            const hpcpOutput = essentia.HPCP(
-              peaks.frequencies,
-              peaks.magnitudes,
-            );
+            const hpcpOutput = essentia.HPCP(peaks.frequencies, peaks.magnitudes);
             if (hpcpOutput.hpcp) {
               chromaVector = essentia.vectorToArray
                 ? essentia.vectorToArray(hpcpOutput.hpcp)
@@ -937,11 +935,7 @@ async function processWithEssentiaJS(
               rms: frameRMS,
               spectral_flux: spectralFlux,
               chroma_entropy: chromaEntropy,
-              has_vocals: detectVocalPresence(
-                frameRMS,
-                spectralFlux,
-                chromaEntropy,
-              ),
+              has_vocals: detectVocalPresence(frameRMS, spectralFlux, chromaEntropy),
               rms_delta: frameRMS - prevRms,
             });
           }
@@ -950,15 +944,10 @@ async function processWithEssentiaJS(
           // Optimize: Pre-filter beats to avoid expensive .some() on every frame
           if (beatTimestamps.length > 0) {
             // Only check if timestamp is near a beat (within 0.1s)
-            const nearBeat = beatTimestamps.some(
-              (beat) => Math.abs(beat - timestamp) < 0.1,
-            );
+            const nearBeat = beatTimestamps.some((beat) => Math.abs(beat - timestamp) < 0.1);
             if (nearBeat) {
               try {
-                const chordDetection = detectChordFromChroma(
-                  chromaVector,
-                  essentia,
-                );
+                const chordDetection = detectChordFromChroma(chromaVector, essentia);
                 if (chordDetection) {
                   events.push({
                     timestamp,
@@ -1024,9 +1013,7 @@ async function processWithEssentiaJS(
     }
   } else {
     // Fallback: Use simple analyzer if Essentia DSP pipeline not available
-    logger.warn(
-      'Essentia DSP pipeline not available, using simple analyzer for chroma',
-    );
+    logger.warn('Essentia DSP pipeline not available, using simple analyzer for chroma');
     try {
       const simpleAnalyzer = require('./fallbacks/simpleAudioAnalyzer');
       const simpleChromaFrames = await simpleAnalyzer.extractChromaWithProgress(
@@ -1047,32 +1034,19 @@ async function processWithEssentiaJS(
         if (simpleChromaFrames.semanticFrames) {
           semanticFrameFeatures.push(...simpleChromaFrames.semanticFrames);
         }
-        logger.pass1(
-          `Created ${chromaFrames.length} chroma frames using simple analyzer fallback`,
-        );
+        logger.pass1(`Created ${chromaFrames.length} chroma frames using simple analyzer fallback`);
       }
     } catch (fallbackError) {
-      logger.warn(
-        'Simple analyzer chroma fallback also failed:',
-        fallbackError.message,
-      );
+      logger.warn('Simple analyzer chroma fallback also failed:', fallbackError.message);
     }
   }
 
-  logger.pass1(
-    `Chroma extraction complete: ${chromaFrames.length} frames extracted`,
-  );
+  logger.pass1(`Chroma extraction complete: ${chromaFrames.length} frames extracted`);
   progressCallback(85);
 
   // If chroma extraction completely failed, use simple analyzer's chroma extraction as fallback
-  if (
-    chromaFrames.length === 0 &&
-    beatTimestamps.length > 0 &&
-    samples.length > 0
-  ) {
-    logger.warn(
-      'Essentia chroma extraction failed, using simple analyzer fallback',
-    );
+  if (chromaFrames.length === 0 && beatTimestamps.length > 0 && samples.length > 0) {
+    logger.warn('Essentia chroma extraction failed, using simple analyzer fallback');
     try {
       const simpleAnalyzer = require('./fallbacks/simpleAudioAnalyzer');
       const simpleChromaFrames = await simpleAnalyzer.extractChromaWithProgress(
@@ -1088,10 +1062,7 @@ async function processWithEssentiaJS(
       }
     } catch (fallbackError) {
       logger.warn('Creating minimal chroma from beats as last resort');
-      for (const beatTime of beatTimestamps.slice(
-        0,
-        Math.min(beatTimestamps.length, 500),
-      )) {
+      for (const beatTime of beatTimestamps.slice(0, Math.min(beatTimestamps.length, 500))) {
         chromaFrames.push({
           timestamp: beatTime,
           chroma: new Array(12).fill(0.1),
@@ -1152,9 +1123,7 @@ async function processWithEssentiaJS(
             detectedMode = scale || 'major';
           }
           keyDetectionSuccess = true;
-          logger.pass1(
-            `✓ ${algo.name} succeeded: ${detectedKey} ${detectedMode}`,
-          );
+          logger.pass1(`✓ ${algo.name} succeeded: ${detectedKey} ${detectedMode}`);
         }
       }
     } catch (error) {
@@ -1176,20 +1145,7 @@ async function processWithEssentiaJS(
         if (f.chroma) f.chroma.forEach((v, i) => (chromaSum[i] += v));
       });
       const maxIdx = chromaSum.indexOf(Math.max(...chromaSum));
-      const keyNames = [
-        'C',
-        'C#',
-        'D',
-        'D#',
-        'E',
-        'F',
-        'F#',
-        'G',
-        'G#',
-        'A',
-        'A#',
-        'B',
-      ];
+      const keyNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
       detectedKey = keyNames[maxIdx];
       logger.pass1(`Fallback key from chroma: ${detectedKey}`);
     } catch (e) {}
@@ -1202,9 +1158,7 @@ async function processWithEssentiaJS(
     events: events.sort((a, b) => a.timestamp - b.timestamp),
     beat_grid: {
       tempo_bpm:
-        beatTimestamps.length > 1
-          ? 60 / (beatTimestamps[1] - beatTimestamps[0] || 0.5)
-          : 120,
+        beatTimestamps.length > 1 ? 60 / (beatTimestamps[1] - beatTimestamps[0] || 0.5) : 120,
       tempo_stability: calculateTempoStability(beatTimestamps),
       beat_timestamps: beatTimestamps,
       downbeat_timestamps: downbeatTimestamps,
@@ -1310,7 +1264,9 @@ function detectChordFromChroma(chromaVector, essentia) {
 }
 
 function applyMetadataOverrides(linearAnalysis, metadataOverrides = {}) {
+  // Task 4: Handle undefined values gracefully
   if (!linearAnalysis) {
+    logger.debug('[MetadataOverrides] linearAnalysis is undefined, skipping');
     return;
   }
 
@@ -1320,14 +1276,42 @@ function applyMetadataOverrides(linearAnalysis, metadataOverrides = {}) {
   const overrides = metadataOverrides || {};
   const beatGrid = linearAnalysis.beat_grid;
 
-  if (overrides.key_hint) {
-    linearAnalysis.metadata.detected_key = overrides.key_hint;
-    linearAnalysis.metadata.key_source = 'metadata_hint';
+  // Only override if hint is provided AND detected value is missing or low confidence
+  // Gracefully handle undefined/missing values
+  if (overrides && overrides.key_hint) {
+    const detectedKey = linearAnalysis.metadata?.detected_key;
+    const keyConfidence = linearAnalysis.metadata?.key_confidence || 0;
+
+    // Only override if no detection or confidence is very low (< 0.3)
+    if (!detectedKey || keyConfidence < 0.3) {
+      logger.debug(
+        `[MetadataOverrides] Overriding key: ${detectedKey || 'none'} -> ${overrides.key_hint} (confidence: ${keyConfidence})`,
+      );
+      linearAnalysis.metadata.detected_key = overrides.key_hint;
+      linearAnalysis.metadata.key_source = 'metadata_hint';
+    } else {
+      logger.debug(
+        `[MetadataOverrides] Keeping detected key: ${detectedKey} (confidence: ${keyConfidence})`,
+      );
+    }
   }
 
-  if (overrides.mode_hint) {
-    linearAnalysis.metadata.detected_mode = overrides.mode_hint;
-    linearAnalysis.metadata.mode_source = 'metadata_hint';
+  if (overrides && overrides.mode_hint) {
+    const detectedMode = linearAnalysis.metadata?.detected_mode;
+    const keyConfidence = linearAnalysis.metadata?.key_confidence || 0;
+
+    // Only override if no detection or confidence is very low (< 0.3)
+    if (!detectedMode || keyConfidence < 0.3) {
+      logger.debug(
+        `[MetadataOverrides] Overriding mode: ${detectedMode || 'none'} -> ${overrides.mode_hint} (confidence: ${keyConfidence})`,
+      );
+      linearAnalysis.metadata.detected_mode = overrides.mode_hint;
+      linearAnalysis.metadata.mode_source = 'metadata_hint';
+    } else {
+      logger.debug(
+        `[MetadataOverrides] Keeping detected mode: ${detectedMode} (confidence: ${keyConfidence})`,
+      );
+    }
   }
 
   if (overrides.tempo_hint) {
@@ -1340,9 +1324,7 @@ function applyMetadataOverrides(linearAnalysis, metadataOverrides = {}) {
       ratio > 1.25
     ) {
       const dropEvery = Math.max(2, Math.round(ratio));
-      beatGrid.beat_timestamps = beatGrid.beat_timestamps.filter(
-        (_, idx) => idx % dropEvery === 0,
-      );
+      beatGrid.beat_timestamps = beatGrid.beat_timestamps.filter((_, idx) => idx % dropEvery === 0);
       if (Array.isArray(beatGrid.downbeat_timestamps)) {
         beatGrid.downbeat_timestamps = beatGrid.downbeat_timestamps.filter(
           (_, idx) => idx % dropEvery === 0,
@@ -1373,8 +1355,7 @@ function calculateTempoStability(beatTimestamps) {
   if (intervals.length === 0) return 0.5;
 
   const mean = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-  const variance =
-    intervals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / intervals.length;
+  const variance = intervals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / intervals.length;
   const stdDev = Math.sqrt(variance);
 
   // Stability is inverse of coefficient of variation

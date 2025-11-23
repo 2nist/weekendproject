@@ -18,10 +18,10 @@ async function verifyEssentia() {
   const essentia = await loader.getEssentiaInstance();
   
   if (!essentia) {
-    console.error('✗ FAILED: Essentia instance is null');
+    console.error('FAILED: Essentia instance is null');
     process.exit(1);
   }
-  console.log('✓ Essentia loaded successfully');
+  console.log('Essentia loaded successfully');
   console.log('');
 
   // Test 2: Check for required methods
@@ -30,10 +30,10 @@ async function verifyEssentia() {
   const missing = requiredMethods.filter(m => typeof essentia[m] !== 'function');
   
   if (missing.length > 0) {
-    console.error(`✗ FAILED: Missing methods: ${missing.join(', ')}`);
+    console.error(`FAILED: Missing methods: ${missing.join(', ')}`);
     process.exit(1);
   }
-  console.log('✓ All required methods available');
+  console.log('All required methods available');
   console.log('');
 
   // Test 3: Test arrayToVector and vectorToArray
@@ -45,20 +45,20 @@ async function verifyEssentia() {
     if (!vector) {
       throw new Error('arrayToVector returned null');
     }
-    console.log('✓ arrayToVector works');
+    console.log('arrayToVector works');
     
     const backToArray = essentia.vectorToArray(vector);
     if (!Array.isArray(backToArray) && !(backToArray instanceof Float32Array)) {
       throw new Error('vectorToArray did not return an array');
     }
-    console.log('✓ vectorToArray works');
+    console.log('vectorToArray works');
     
     // Cleanup
     if (vector.delete && typeof vector.delete === 'function') {
       vector.delete();
     }
   } catch (error) {
-    console.error(`✗ FAILED: Vector conversion error: ${error.message}`);
+    console.error(`FAILED: Vector conversion error: ${error.message}`);
     process.exit(1);
   }
   console.log('');
@@ -120,9 +120,9 @@ async function verifyEssentia() {
     }
     
     if (!chromaVector || chromaVector.length === 0) {
-      console.warn('  ⚠ Chromagram returned empty result, but algorithm executed');
+      console.warn('  Chromagram returned empty result, but algorithm executed');
     } else {
-      console.log('✓ Chromagram algorithm works');
+      console.log('Chromagram algorithm works');
       console.log(`  Chroma vector length: ${chromaVector.length}`);
     }
     
@@ -134,7 +134,7 @@ async function verifyEssentia() {
       chromaResult.chromagram.delete();
     }
   } catch (error) {
-    console.warn(`  ⚠ Chromagram test failed (may need specific parameters): ${error.message}`);
+    console.warn(`  Chromagram test failed (may need specific parameters): ${error.message}`);
     console.log('  This is non-critical - algorithm exists and can be configured');
   }
   console.log('');
@@ -158,7 +158,7 @@ async function verifyEssentia() {
       throw new Error('KeyExtractor returned null');
     }
     
-    console.log('✓ KeyExtractor algorithm works');
+    console.log('KeyExtractor algorithm works');
     if (keyResult.key) {
       console.log(`  Detected key: ${keyResult.key} ${keyResult.scale || keyResult.mode || ''}`);
     }
@@ -168,7 +168,7 @@ async function verifyEssentia() {
       signalVector.delete();
     }
   } catch (error) {
-    console.error(`✗ FAILED: KeyExtractor error: ${error.message}`);
+    console.error(`FAILED: KeyExtractor error: ${error.message}`);
     console.error('  Stack:', error.stack?.split('\n').slice(0, 3).join('\n'));
     process.exit(1);
   }
@@ -190,14 +190,14 @@ async function verifyEssentia() {
       
       // Load audio
       const audioData = await loader.loadAudioFile(audioPath);
-      console.log(`  ✓ Audio loaded: ${audioData.samples.length} samples at ${audioData.sampleRate}Hz`);
+      console.log(`  Audio loaded: ${audioData.samples.length} samples at ${audioData.sampleRate}Hz`);
       
       // Test chroma extraction on real audio
       const chunk = audioData.samples.slice(0, 2048); // First frame
       const chunkVector = essentia.arrayToVector(chunk);
       const chroma = essentia.Chromagram(chunkVector, audioData.sampleRate);
       
-      console.log('  ✓ Chroma extraction on real audio works');
+      console.log('  Chroma extraction on real audio works');
       
       // Cleanup
       if (chunkVector.delete && typeof chunkVector.delete === 'function') {
@@ -212,20 +212,20 @@ async function verifyEssentia() {
         fileProcessor.cleanupTempFile(audioPath);
       }
     } else {
-      console.log('  ⚠ No test audio files found, skipping file test');
+      console.log('  No test audio files found, skipping file test');
     }
   } catch (error) {
-    console.warn(`  ⚠ File test failed (non-critical): ${error.message}`);
+    console.warn(`  File test failed (non-critical): ${error.message}`);
   }
   console.log('');
 
   console.log('='.repeat(80));
-  console.log('✅ ALL TESTS PASSED - ESSENTIA.JS IS FULLY FUNCTIONAL');
+  console.log('ALL TESTS PASSED - ESSENTIA.JS IS FULLY FUNCTIONAL');
   console.log('='.repeat(80));
 }
 
 verifyEssentia().catch((error) => {
-  console.error('\n✗ VERIFICATION FAILED:', error.message);
+  console.error('\nVERIFICATION FAILED:', error.message);
   console.error('Stack:', error.stack);
   process.exit(1);
 });

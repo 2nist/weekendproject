@@ -30,10 +30,10 @@ export const DEFAULT_THEME: Record<string, string> = {
   
   // Typography & Layout
   '--radius': '0.5rem',            // Border radius
-  '--font-sans': 'Inter',
-  '--font-mono': 'JetBrains Mono',
-  '--font-serif': 'Georgia',
-  '--font-display': 'system-ui',
+  '--font-sans': 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+  '--font-mono': '"JetBrains Mono", "Fira Code", Consolas, Monaco, "Courier New", monospace',
+  '--font-serif': 'Georgia, "Times New Roman", Times, serif',
+  '--font-display': 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
   
   // Music semantic colors
   '--music-kick': '#06b6d4',
@@ -159,6 +159,29 @@ export function applyTheme(theme: Record<string, string>) {
     document.head.appendChild(themeStyle);
   }
   
+  // Helper to check if a key is a font variable
+  const isFontVariable = (key: string) => key.startsWith('--font-');
+  
+  // Helper to add font fallbacks if not present
+  const addFontFallbacks = (fontName: string, key: string): string => {
+    // If font already has fallbacks (contains comma), return as-is
+    if (fontName.includes(',')) {
+      return fontName;
+    }
+    
+    // Add appropriate fallbacks based on font type
+    if (key === '--font-sans') {
+      return `${fontName}, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif`;
+    } else if (key === '--font-mono') {
+      return `${fontName}, 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace`;
+    } else if (key === '--font-serif') {
+      return `${fontName}, 'Times New Roman', Times, serif`;
+    } else if (key === '--font-display') {
+      return `${fontName}, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
+    }
+    return fontName;
+  };
+  
   // Build CSS rules - apply to both :root and .dark separately
   let cssRules = '';
   
@@ -166,7 +189,11 @@ export function applyTheme(theme: Record<string, string>) {
   cssRules += ':root {\n';
   for (const [k, v] of Object.entries(theme)) {
     let cssValue = v;
-    if (typeof v === 'string' && v.startsWith('#')) {
+    if (isFontVariable(k)) {
+      // Fonts: add fallbacks and wrap in quotes if needed
+      cssValue = addFontFallbacks(v, k);
+    } else if (typeof v === 'string' && v.startsWith('#')) {
+      // Colors: convert hex to HSL
       cssValue = hexToHsl(v);
     }
     cssRules += `  ${k}: ${cssValue};\n`;
@@ -178,7 +205,11 @@ export function applyTheme(theme: Record<string, string>) {
     cssRules += '.dark {\n';
     for (const [k, v] of Object.entries(theme)) {
       let cssValue = v;
-      if (typeof v === 'string' && v.startsWith('#')) {
+      if (isFontVariable(k)) {
+        // Fonts: add fallbacks and wrap in quotes if needed
+        cssValue = addFontFallbacks(v, k);
+      } else if (typeof v === 'string' && v.startsWith('#')) {
+        // Colors: convert hex to HSL
         cssValue = hexToHsl(v);
       }
       cssRules += `  ${k}: ${cssValue};\n`;
@@ -191,27 +222,98 @@ export function applyTheme(theme: Record<string, string>) {
   
   // Also set directly on root for immediate effect (inline styles have highest specificity)
   for (const [k, v] of Object.entries(theme)) {
-    if (typeof v === 'string' && v.startsWith('#')) {
+    if (isFontVariable(k)) {
+      // Fonts: add fallbacks
+      const fontValue = addFontFallbacks(v, k);
+      root.style.setProperty(k, fontValue);
+    } else if (typeof v === 'string' && v.startsWith('#')) {
+      // Colors: convert hex to HSL
       const hsl = hexToHsl(v);
       root.style.setProperty(k, hsl);
     } else {
+      // Other values (like radius): apply as-is
       root.style.setProperty(k, v);
     }
   }
 }
 
 export function saveTheme(theme: Record<string, string>, key = 'user_theme') {
-  localStorage.setItem(key, JSON.stringify(theme));
-}
-
-export function loadTheme(key = 'user_theme') {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
+  const themeJson = JSON.stringify(theme);
+  
+  // Always save to localStorage immediately for instant feedback
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(key, themeJson);
+  }
+  
+  // Also try to save to database via IPC (Electron) - async, don't block
+  if (typeof window !== 'undefined') {
+    const saveToDb = async () => {
+      try {
+        if (window.ipc?.invoke) {
+          await window.ipc.invoke('DB:SET_SETTING', { key, value: themeJson });
+          console.log('[themeUtils] Theme saved to database');
+        } else if (window.electronAPI?.invoke) {
+          await window.electronAPI.invoke('DB:SET_SETTING', { key, value: themeJson });
+          console.log('[themeUtils] Theme saved to database');
+        }
+      } catch (error) {
+        console.warn('[themeUtils] Failed to save theme to database (using localStorage):', error);
+      }
+    };
+    saveToDb(); // Fire and forget
   }
 }
 
-export default { DEFAULT_THEME, hexToHsl, hslToHex, getCssVariableAsHex, loadCurrentTheme, applyTheme, saveTheme, loadTheme };
+export function loadTheme(key = 'user_theme') {
+  // Try to load from database via IPC (Electron) - sync version that checks localStorage first
+  // For async loading, use loadThemeAsync
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const theme = JSON.parse(raw);
+      console.log('[themeUtils] Theme loaded from localStorage');
+      return theme;
+    }
+  } catch {
+    // Continue to try database
+  }
+  
+  // Note: Database loading is async, so we'll load it async on startup
+  // This sync version returns localStorage for immediate use
+  return null;
+}
+
+// Async version for loading from database on startup
+export async function loadThemeAsync(key = 'user_theme') {
+  // Try to load from database via IPC (Electron)
+  if (typeof window !== 'undefined') {
+    try {
+      if (window.ipc?.invoke) {
+        const result = await window.ipc.invoke('DB:GET_SETTINGS');
+        if (result?.success && result.settings?.[key]) {
+          const theme = JSON.parse(result.settings[key]);
+          // Also sync to localStorage for faster future loads
+          localStorage.setItem(key, JSON.stringify(theme));
+          console.log('[themeUtils] Theme loaded from database');
+          return theme;
+        }
+      } else if (window.electronAPI?.invoke) {
+        const result = await window.electronAPI.invoke('DB:GET_SETTINGS');
+        if (result?.success && result.settings?.[key]) {
+          const theme = JSON.parse(result.settings[key]);
+          // Also sync to localStorage for faster future loads
+          localStorage.setItem(key, JSON.stringify(theme));
+          console.log('[themeUtils] Theme loaded from database');
+          return theme;
+        }
+      }
+    } catch (error) {
+      console.warn('[themeUtils] Failed to load theme from database, trying localStorage:', error);
+    }
+  }
+  
+  // Fallback to localStorage
+  return loadTheme(key);
+}
+
+export default { DEFAULT_THEME, hexToHsl, hslToHex, getCssVariableAsHex, loadCurrentTheme, applyTheme, saveTheme, loadTheme, loadThemeAsync };

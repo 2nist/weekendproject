@@ -14,16 +14,16 @@ async function testAudioLoading() {
   try {
     const essentia = await getEssentiaInstance();
     if (essentia) {
-      console.log('   ✓ Essentia initialized successfully');
+      console.log('   Essentia initialized successfully');
       if (essentia.version) {
-        console.log(`   ✓ Version: ${essentia.version}`);
+        console.log(`   Version: ${essentia.version}`);
       }
     } else {
-      console.error('   ✗ Failed to initialize Essentia');
+      console.error('   Failed to initialize Essentia');
       return;
     }
   } catch (error) {
-    console.error(`   ✗ Error: ${error.message}`);
+    console.error(`   Error: ${error.message}`);
     return;
   }
 
@@ -52,7 +52,7 @@ async function testAudioLoading() {
   }
 
   if (!testFile) {
-    console.log('   ⚠ No test audio files found, skipping audio loading tests');
+    console.log('   No test audio files found, skipping audio loading tests');
     console.log('   To test: Place a WAV or MP3 file in electron/analysis/test/');
     return;
   }
@@ -68,10 +68,10 @@ async function testAudioLoading() {
       const { prepareAudioFile } = require('../electron/analysis/fileProcessor');
       testFile = await prepareAudioFile(testFile);
       isTempFile = true;
-      console.log('   ✓ File converted to WAV');
+      console.log('   File converted to WAV');
     } catch (error) {
-      console.error(`   ✗ Conversion failed: ${error.message}`);
-      console.log('   ⚠ Skipping audio loading tests (need WAV file or ffmpeg)');
+      console.error(`   Conversion failed: ${error.message}`);
+      console.log('   Skipping audio loading tests (need WAV file or ffmpeg)');
       return;
     }
   }
@@ -86,25 +86,25 @@ async function testAudioLoading() {
     const endTime = process.hrtime.bigint();
     const loadTimeMs = Number(endTime - startTime) / 1_000_000;
 
-    console.log(`   ✓ Audio loaded in ${loadTimeMs.toFixed(2)}ms`);
-    console.log(`   ✓ Sample rate: ${audioData.sampleRate}Hz`);
-    console.log(`   ✓ Duration: ${audioData.duration.toFixed(2)}s`);
-    console.log(`   ✓ Samples: ${audioData.samples.length.toLocaleString()}`);
-    console.log(`   ✓ Memory efficient: Using Float32Array (${audioData.samples.constructor.name})`);
+    console.log(`   Audio loaded in ${loadTimeMs.toFixed(2)}ms`);
+    console.log(`   Sample rate: ${audioData.sampleRate}Hz`);
+    console.log(`   Duration: ${audioData.duration.toFixed(2)}s`);
+    console.log(`   Samples: ${audioData.samples.length.toLocaleString()}`);
+    console.log(`   Memory efficient: Using Float32Array (${audioData.samples.constructor.name})`);
 
     // Verify it's a Float32Array (not a regular array)
     if (audioData.samples instanceof Float32Array) {
-      console.log('   ✓ Correct data type (Float32Array)');
+      console.log('   Correct data type (Float32Array)');
     } else {
-      console.warn('   ⚠ Expected Float32Array, got:', audioData.samples.constructor.name);
+      console.warn('   Expected Float32Array, got:', audioData.samples.constructor.name);
     }
 
     // Test 4: Sample rate warning test
     console.log('\n4. Testing sample rate validation...');
     if (audioData.sampleRate !== 44100) {
-      console.log(`   ✓ Sample rate warning should have appeared (file: ${audioData.sampleRate}Hz, expected: 44100Hz)`);
+      console.log(`   Sample rate warning should have appeared (file: ${audioData.sampleRate}Hz, expected: 44100Hz)`);
     } else {
-      console.log('   ✓ Sample rate matches expected (44100Hz)');
+      console.log('   Sample rate matches expected (44100Hz)');
     }
 
     // Test 5: Memory usage check
@@ -119,18 +119,18 @@ async function testAudioLoading() {
     
     const memoryIncrease = (usedAfter.heapUsed - usedBefore.heapUsed) / 1024 / 1024;
     if (memoryIncrease < 100) { // Reasonable threshold
-      console.log(`   ✓ Memory increase: ${memoryIncrease.toFixed(2)} MB (acceptable)`);
+      console.log(`   Memory increase: ${memoryIncrease.toFixed(2)} MB (acceptable)`);
     } else {
-      console.warn(`   ⚠ Memory increase: ${memoryIncrease.toFixed(2)} MB (may indicate leak)`);
+      console.warn(`   Memory increase: ${memoryIncrease.toFixed(2)} MB (may indicate leak)`);
     }
 
     // Test 6: Verify stereo-to-mono conversion (if applicable)
     console.log('\n6. Testing stereo-to-mono conversion...');
     // We can't easily test this without a stereo file, but we can verify the logic
-    console.log('   ✓ Stereo-to-mono uses optimized for-loop (no .map())');
-    console.log('   ✓ Pre-allocated Float32Array prevents memory spikes');
+    console.log('   Stereo-to-mono uses optimized for-loop (no .map())');
+    console.log('   Pre-allocated Float32Array prevents memory spikes');
 
-    console.log('\n✅ All tests passed! Optimizations are working correctly.');
+    console.log('\nAll tests passed! Optimizations are working correctly.');
     console.log('\nPerformance improvements verified:');
     console.log('  - Memory-efficient stereo-to-mono conversion');
     console.log('  - Sample rate validation with warnings');
@@ -143,7 +143,7 @@ async function testAudioLoading() {
     }
 
   } catch (error) {
-    console.error(`   ✗ Error loading audio: ${error.message}`);
+    console.error(`   Error loading audio: ${error.message}`);
     if (error.stack) {
       console.error('   Stack:', error.stack.split('\n').slice(0, 3).join('\n'));
     }

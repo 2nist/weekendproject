@@ -6,6 +6,48 @@
 import type { BeatNode, Measure, Section } from './audio';
 
 /**
+ * Analysis Data Structure
+ * The complete analysis result from the backend
+ */
+export interface AnalysisData {
+  id?: number;
+  fileHash?: string;
+  file_hash?: string;
+  file_path?: string;
+  linear_analysis?: {
+    events?: any[];
+    beat_grid?: {
+      beat_timestamps?: number[];
+      tempo_bpm?: number;
+      time_signature?: { numerator: number; denominator: number } | string;
+    };
+    metadata?: {
+      duration_seconds?: number;
+      detected_key?: string;
+      detected_mode?: string;
+      sample_rate?: number;
+      hop_length?: number;
+      frame_hop_seconds?: number;
+    };
+  };
+  structural_map?: {
+    sections?: any[];
+    debug?: {
+      noveltyCurve?: number[];
+      novelty_curve?: number[];
+    };
+  };
+  harmonic_context?: {
+    global_key?: {
+      primary_key?: string;
+      confidence?: number;
+    };
+    alt_keys?: Array<{ key: string; confidence: number }>;
+  };
+  [key: string]: any; // Allow additional properties
+}
+
+/**
  * Selection Target - What the user has selected in the editor
  */
 export type SelectionTarget =
@@ -20,18 +62,18 @@ export type SelectionTarget =
 export type ViewMode = 'harmony' | 'structure' | 'rhythm';
 
 /**
- * Analysis Data Structure
- * The full JSON from the backend analysis
+ * Project Data Structure
  */
-export interface AnalysisData {
-  fileHash?: string;
-  file_hash?: string;
-  file_path?: string;
-  linear_analysis?: any;
-  structural_map?: any;
-  harmonic_context?: any;
-  metadata?: any;
-  [key: string]: any; // Allow additional properties
+export interface Project {
+  id: number;
+  title: string;
+  artist: string;
+  analysis_id?: number;
+  midi_path?: string;
+  audio_path?: string;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 /**
@@ -40,11 +82,14 @@ export interface AnalysisData {
  */
 export interface EditorState {
   songData: AnalysisData | null;
+  project: Project | null;
   globalKey: string;
   selection: SelectionTarget;
   viewMode: ViewMode;
   isProcessing: boolean;
   isDirty: boolean;
+  isPlaying: boolean;
+  playbackTime: number;
 }
 
 /**
@@ -57,11 +102,17 @@ export interface EditorActions {
   updateKey: (key: string) => Promise<void>;
   updateSongData: (newData: AnalysisData) => void;
   updateChord: (beatId: string, newChordLabel: string) => void;
+  updateBeat: (
+    beatId: string,
+    patch: { chord?: string; hasKick?: boolean; hasSnare?: boolean; function?: string },
+  ) => void;
   updateSection: (sectionId: string, patch: { label?: string; color?: string }) => void;
   saveChanges: () => Promise<void>;
   setViewMode: (mode: ViewMode) => void;
   setProcessing: (processing: boolean) => void;
   setDirty: (dirty: boolean) => void;
+  setPlaybackTime: (time: number) => void;
+  togglePlayback: () => void;
 }
 
 /**
@@ -72,4 +123,3 @@ export interface EditorContextValue {
   state: EditorState;
   actions: EditorActions;
 }
-

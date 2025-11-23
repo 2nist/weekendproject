@@ -18,14 +18,14 @@ async function smokeTest() {
   try {
     const essentia = await getEssentiaInstance();
     if (essentia) {
-      console.log('✓ Essentia loads');
+      console.log('Essentia loads');
       passed++;
     } else {
-      console.error('✗ Essentia failed to load');
+      console.error('Essentia failed to load');
       failed++;
     }
   } catch (error) {
-    console.error('✗ Essentia load error:', error.message);
+    console.error('Essentia load error:', error.message);
     failed++;
   }
   
@@ -37,18 +37,18 @@ async function smokeTest() {
     try {
       const audioData = await loadAudioFile(testFile);
       if (audioData && audioData.samples && audioData.samples.length > 0) {
-        console.log('✓ Audio file loads');
+        console.log('Audio file loads');
         passed++;
       } else {
-        console.error('✗ Audio file load returned invalid data');
+        console.error('Audio file load returned invalid data');
         failed++;
       }
     } catch (error) {
-      console.error('✗ Audio file load error:', error.message);
+      console.error('Audio file load error:', error.message);
       failed++;
     }
   } else {
-    console.warn('⚠ Test file not found, skipping audio load test');
+    console.warn('Test file not found, skipping audio load test');
   }
   
   // Test 3: Quick analysis (first 10 seconds)
@@ -57,7 +57,7 @@ async function smokeTest() {
       let analysisStarted = false;
       const timeout = setTimeout(() => {
         if (!analysisStarted) {
-          console.error('✗ Analysis timeout (30s)');
+          console.error('Analysis timeout (30s)');
           failed++;
           process.exit(1);
         }
@@ -68,14 +68,14 @@ async function smokeTest() {
       clearTimeout(timeout);
       
       if (result && result.linear_analysis) {
-        console.log('✓ Analysis completes');
+        console.log('Analysis completes');
         passed++;
       } else {
-        console.error('✗ Analysis returned invalid result');
+        console.error('Analysis returned invalid result');
         failed++;
       }
     } catch (error) {
-      console.error('✗ Analysis error:', error.message);
+      console.error('Analysis error:', error.message);
       failed++;
     }
   }
@@ -83,10 +83,10 @@ async function smokeTest() {
   console.log(`\nResults: ${passed} passed, ${failed} failed`);
   
   if (failed === 0) {
-    console.log('✅ All smoke tests passed');
+    console.log('All smoke tests passed');
     process.exit(0);
   } else {
-    console.error('❌ Some smoke tests failed');
+    console.error('Some smoke tests failed');
     process.exit(1);
   }
 }

@@ -103,7 +103,7 @@ export function transformAnalysisToGrid(
     ) {
       // Warn once per non-TS chord event so devs can detect 'Event Soup'
       console.warn(
-        '⚠️ UI rendering non-Viterbi chord event detected at',
+        'UI rendering non-Viterbi chord event detected at',
         roundedTime,
         wrapped.source,
         wrapped._chord_label,

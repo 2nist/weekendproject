@@ -9,11 +9,14 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "strict": false,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
     "baseUrl": "."
   },
   "include": [
     "scripts/**/*",
-    "benchmarks/**/*"
+    "benchmarks/**/*",
+    "src/**/*"
   ]
 }
 

@@ -11,6 +11,7 @@ export default function SandboxMode({
   generatedBlocks,
   onUpdateBlock,
   setGlobalBlocks,
+  onSwitchToGrid,
 }) {
   const [constraints, setConstraints] = useState({
     genre: 'pop',
@@ -118,30 +119,22 @@ export default function SandboxMode({
   }, [selectedBlock]);
 
   return (
-    <div style={{ display: 'flex', gap: 16, padding: 16, height: '100vh' }}>
+    <div className="flex gap-4 p-4 h-screen">
       {/* Left: Constraint Panel */}
-      <aside style={{ width: '300px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px' }}>
-        <h2 style={{ marginTop: 0, marginBottom: '20px' }}>Blank Canvas</h2>
-        <p style={{ fontSize: '14px', color: '#666', marginBottom: '20px' }}>
+      <aside className="w-72 overflow-y-auto border border-border rounded-lg p-5">
+        <h2 className="mt-0 mb-5 text-xl font-semibold text-foreground">Blank Canvas</h2>
+        <p className="text-sm text-muted-foreground mb-5">
           Define constraints and generate a song structure from scratch.
         </p>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div className="flex flex-col gap-5">
           {/* Genre Selection */}
           <div>
-            <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
-              Genre
-            </label>
+            <label className="block mb-2 font-medium text-foreground">Genre</label>
             <select
               value={constraints.genre}
               onChange={(e) => handleConstraintChange('genre', e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '14px',
-              }}
+              className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
             >
               {genres.map((genre) => (
                 <option key={genre} value={genre}>
@@ -153,19 +146,11 @@ export default function SandboxMode({
 
           {/* Form Selection */}
           <div>
-            <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
-              Song Form
-            </label>
+            <label className="block mb-2 font-medium text-foreground">Song Form</label>
             <select
               value={constraints.form}
               onChange={(e) => handleConstraintChange('form', e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '14px',
-              }}
+              className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
             >
               {forms.map((form) => (
                 <option key={form.value} value={form.value}>
@@ -177,20 +162,12 @@ export default function SandboxMode({
 
           {/* Key Selection */}
           <div>
-            <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
-              Key
-            </label>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <label className="block mb-2 font-medium text-foreground">Key</label>
+            <div className="flex gap-2">
               <select
                 value={constraints.key}
                 onChange={(e) => handleConstraintChange('key', e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: '8px',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                }}
+                className="flex-1 px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
               >
                 {['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'].map((key) => (
                   <option key={key} value={key}>
@@ -201,13 +178,7 @@ export default function SandboxMode({
               <select
                 value={constraints.mode}
                 onChange={(e) => handleConstraintChange('mode', e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: '8px',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                }}
+                className="flex-1 px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
               >
                 <option value="major">Major</option>
                 <option value="minor">Minor</option>
@@ -220,7 +191,7 @@ export default function SandboxMode({
 
           {/* Tempo */}
           <div>
-            <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
+            <label className="block mb-2 font-medium text-foreground">
               Tempo: {constraints.tempo} BPM
             </label>
             <input
@@ -228,14 +199,14 @@ export default function SandboxMode({
               min="60"
               max="180"
               value={constraints.tempo}
-              onChange={(e) => handleConstraintChange('tempo', parseInt(e.target.value))}
-              style={{ width: '100%' }}
+              onChange={(e) => handleConstraintChange('tempo', Number.parseInt(e.target.value, 10))}
+              className="w-full"
             />
           </div>
 
           {/* Harmonic Complexity */}
           <div>
-            <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
+            <label className="block mb-2 font-medium text-foreground">
               Harmonic Complexity: {constraints.harmonicComplexity}%
             </label>
             <input
@@ -243,19 +214,23 @@ export default function SandboxMode({
               min="0"
               max="100"
               value={constraints.harmonicComplexity}
-              onChange={(e) => handleConstraintChange('harmonicComplexity', parseInt(e.target.value))}
-              style={{ width: '100%' }}
+              onChange={(e) =>
+                handleConstraintChange('harmonicComplexity', Number.parseInt(e.target.value, 10))
+              }
+              className="w-full"
             />
-            <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+            <div className="text-xs text-muted-foreground mt-1">
               {constraints.harmonicComplexity < 30 && 'Simple (triads)'}
-              {constraints.harmonicComplexity >= 30 && constraints.harmonicComplexity < 70 && 'Moderate (7ths, 9ths)'}
+              {constraints.harmonicComplexity >= 30 &&
+                constraints.harmonicComplexity < 70 &&
+                'Moderate (7ths, 9ths)'}
               {constraints.harmonicComplexity >= 70 && 'Complex (11ths, 13ths, altered)'}
             </div>
           </div>
 
           {/* Rhythmic Density */}
           <div>
-            <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
+            <label className="block mb-2 font-medium text-foreground">
               Rhythmic Density: {constraints.rhythmicDensity}%
             </label>
             <input
@@ -263,10 +238,12 @@ export default function SandboxMode({
               min="0"
               max="100"
               value={constraints.rhythmicDensity}
-              onChange={(e) => handleConstraintChange('rhythmicDensity', parseInt(e.target.value))}
-              style={{ width: '100%' }}
+              onChange={(e) =>
+                handleConstraintChange('rhythmicDensity', Number.parseInt(e.target.value, 10))
+              }
+              className="w-full"
             />
-            <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+            <div className="text-xs text-muted-foreground mt-1">
               {constraints.rhythmicDensity < 30 && 'Sparse'}
               {constraints.rhythmicDensity >= 30 && constraints.rhythmicDensity < 70 && 'Moderate'}
               {constraints.rhythmicDensity >= 70 && 'Dense'}
@@ -275,7 +252,7 @@ export default function SandboxMode({
 
           {/* Number of Sections */}
           <div>
-            <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
+            <label className="block mb-2 font-medium text-foreground">
               Sections: {constraints.sections}
             </label>
             <input
@@ -283,8 +260,10 @@ export default function SandboxMode({
               min="2"
               max="12"
               value={constraints.sections}
-              onChange={(e) => handleConstraintChange('sections', parseInt(e.target.value))}
-              style={{ width: '100%' }}
+              onChange={(e) =>
+                handleConstraintChange('sections', Number.parseInt(e.target.value, 10))
+              }
+              className="w-full"
             />
           </div>
 
@@ -292,18 +271,11 @@ export default function SandboxMode({
           <button
             onClick={handleGenerate}
             disabled={isGenerating}
-            style={{
-              width: '100%',
-              padding: '12px',
-              backgroundColor: isGenerating ? '#9ca3af' : '#2563eb',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              fontSize: '16px',
-              fontWeight: '600',
-              cursor: isGenerating ? 'not-allowed' : 'pointer',
-              marginTop: '10px',
-            }}
+            className={`w-full py-3 px-4 rounded-md font-semibold text-base cursor-pointer mt-2.5 ${
+              isGenerating
+                ? 'bg-muted text-muted-foreground cursor-not-allowed'
+                : 'bg-primary text-primary-foreground hover:bg-primary/90'
+            }`}
           >
             {isGenerating ? 'Generating...' : 'Generate Structure'}
           </button>
@@ -311,41 +283,41 @@ export default function SandboxMode({
       </aside>
 
       {/* Center: Generated Structure */}
-      <main style={{ flex: 1, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '20px' }}>
-        <h3 style={{ marginTop: 0 }}>Generated Structure</h3>
-        
+      <main className="flex-1 overflow-y-auto border border-border rounded-lg p-5">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="m-0 text-lg font-semibold text-foreground">Generated Structure</h3>
+          {generatedBlocks && generatedBlocks.length > 0 && onSwitchToGrid && (
+            <button
+              onClick={onSwitchToGrid}
+              className="px-4 py-2 border border-border rounded cursor-pointer bg-purple-600 text-white font-medium text-sm hover:bg-purple-700"
+            >
+              View in Grid
+            </button>
+          )}
+        </div>
+
         {generatedBlocks && generatedBlocks.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div className="flex flex-col gap-3">
             {generatedBlocks.map((block, idx) => (
               <div
                 key={block.id || idx}
                 onClick={() => setSelectedBlock(block)}
-                style={{
-                  border: selectedBlock?.id === block.id ? '2px solid #2563eb' : '1px solid #ddd',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  padding: '8px',
-                  backgroundColor: selectedBlock?.id === block.id ? '#eff6ff' : 'white',
-                }}
+                className={`border rounded cursor-pointer p-2 ${
+                  selectedBlock?.id === block.id
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-300 bg-white'
+                }`}
               >
                 <ArrangementBlock block={block} onClick={() => {}} />
               </div>
             ))}
           </div>
         ) : (
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
-            height: '400px',
-            color: '#9ca3af',
-            fontSize: '18px',
-            textAlign: 'center',
-          }}>
+          <div className="flex items-center justify-center h-96 text-muted-foreground text-center">
             <div>
-              <div style={{ fontSize: '48px', marginBottom: '16px' }}>🎵</div>
-              <div>No structure generated yet</div>
-              <div style={{ fontSize: '14px', marginTop: '8px' }}>
+              <div className="text-6xl mb-4">♪</div>
+              <div className="text-lg">No structure generated yet</div>
+              <div className="text-sm mt-2">
                 Configure constraints and click "Generate Structure"
               </div>
             </div>
@@ -355,48 +327,23 @@ export default function SandboxMode({
 
       {/* Right: Probability Dashboard / Sculpting Panel */}
       {selectedBlock && (
-        <aside
-          style={{
-            width: '320px',
-            overflowY: 'auto',
-            border: '1px solid #e5e7eb',
-            borderRadius: '8px',
-            padding: '20px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '16px',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <h4 style={{ margin: 0 }}>Sculpt Section</h4>
+        <aside className="w-80 overflow-y-auto border border-border rounded-lg p-5 flex flex-col gap-4 bg-card">
+          <div className="flex justify-between items-center">
+            <h4 className="m-0 text-lg font-semibold text-foreground">Sculpt Section</h4>
             <button
               onClick={() => setSelectedBlock(null)}
-              style={{
-                padding: '4px 8px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '12px',
-              }}
+              className="px-2 py-1 border border-border rounded cursor-pointer text-sm hover:bg-accent"
             >
               Close
             </button>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <div className="flex flex-col gap-3">
             <div>
-              <label style={{ display: "block", marginBottom: "6px", fontWeight: "500" }}>
-                Section Label
-              </label>
+              <label className="block mb-1.5 font-medium text-foreground">Section Label</label>
               <input
                 type="text"
-                value={selectedBlock.label || selectedBlock.section_label || ""}
+                value={selectedBlock.label || selectedBlock.section_label || ''}
                 onChange={(event) =>
                   handleBlockUpdate(selectedBlock.id, {
                     label: event.target.value,
@@ -404,83 +351,58 @@ export default function SandboxMode({
                     section_label: event.target.value,
                   })
                 }
-                style={{
-                  width: "100%",
-                  padding: "8px",
-                  border: "1px solid #ddd",
-                  borderRadius: "4px",
-                }}
+                className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
 
             <div>
-              <label style={{ display: "block", marginBottom: "6px", fontWeight: "500" }}>
-                Variant
-              </label>
+              <label className="block mb-1.5 font-medium text-foreground">Variant</label>
               <input
                 type="number"
                 min="1"
                 value={selectedBlock.section_variant || 1}
                 onChange={(event) =>
                   handleBlockUpdate(selectedBlock.id, {
-                    section_variant: parseInt(event.target.value, 10) || 1,
+                    section_variant: Number.parseInt(event.target.value, 10) || 1,
                   })
                 }
-                style={{
-                  width: "100%",
-                  padding: "8px",
-                  border: "1px solid #ddd",
-                  borderRadius: "4px",
-                }}
+                className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
 
             <div>
-              <label style={{ display: "block", marginBottom: "6px", fontWeight: "500" }}>
-                Length (bars)
-              </label>
+              <label className="block mb-1.5 font-medium text-foreground">Length (bars)</label>
               <input
                 type="number"
                 min="1"
                 value={selectedBlock.bars || selectedBlock.length || 4}
                 onChange={(event) => {
-                  const nextValue = parseInt(event.target.value, 10) || 4;
+                  const nextValue = Number.parseInt(event.target.value, 10) || 4;
                   handleBlockUpdate(selectedBlock.id, {
                     bars: nextValue,
                     length: nextValue,
                   });
                 }}
-                style={{
-                  width: "100%",
-                  padding: "8px",
-                  border: "1px solid #ddd",
-                  borderRadius: "4px",
-                }}
+                className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
 
             <div>
-              <label style={{ display: "block", marginBottom: "6px", fontWeight: "500" }}>
+              <label className="block mb-1.5 font-medium text-foreground">
                 Chord Progression (comma separated)
               </label>
               <textarea
                 value={progressionInput}
                 onChange={(event) => handleProgressionChange(event.target.value)}
                 rows={4}
-                style={{
-                  width: "100%",
-                  padding: "8px",
-                  border: "1px solid #ddd",
-                  borderRadius: "4px",
-                  fontFamily: "monospace",
-                }}
+                className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
           </div>
 
           <SectionSculptor
             section={selectedBlock}
-            fileHash={window.__lastAnalysisHash || globalThis.__currentFileHash || null}
+            fileHash={globalThis.__lastAnalysisHash || globalThis.__currentFileHash || null}
             onUpdate={(update) => {
               handleBlockUpdate(selectedBlock.id, update);
             }}
@@ -498,4 +420,3 @@ function blockProgressionToString(block) {
     .map((entry) => entry.functional_analysis?.roman_numeral || entry.chord?.root || 'I')
     .join(', ');
 }
-

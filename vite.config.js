@@ -12,11 +12,14 @@ export default defineConfig({
   },
   server: {
     watch: {
-      // 🔴 Tell Vite to ignore the database and electron folder to prevent infinite reloads
+      // Tell Vite to ignore the database and electron folder to prevent infinite reloads
       ignored: [
         '**/electron/**',
         '**/userData/**',
         '**/*.sqlite',
+        '**/*.json',
+        '**/*.log',
+        '**/*.py',
         '**/*.db',
         '**/node_modules/**',
         '**/dist/**',

@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('ipc', {
     return ipcRenderer.invoke(channel, data);
   },
 });
+console.log('[preload] ipc exposed');
 
 // Expose electronAPI for analysis features
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -27,6 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('DIALOG:SHOW_OPEN', options);
   },
 });
+console.log('[preload] electronAPI exposed');
 
 // Backwards-compatible alias for convenience in renderer code
 contextBridge.exposeInMainWorld('electron', {
@@ -43,4 +45,7 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('LIBRARY:PARSE_MIDI', payload),
   attachMidi: (payload) =>
     ipcRenderer.invoke('LIBRARY:ATTACH_MIDI', payload),
+  getLyrics: (payload) =>
+    ipcRenderer.invoke('LYRICS:GET', payload),
 });
+console.log('[preload] electron compatibility API exposed');

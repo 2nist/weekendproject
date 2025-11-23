@@ -7,6 +7,7 @@ const { app } = require('electron');
 type ImportPayload = {
   audioPath?: string;
   midiPath?: string;
+  lyricsPath?: string;
   title?: string;
   artist?: string;
   bpm?: number;
@@ -18,25 +19,41 @@ function ensureDirs(userDataPath: string) {
   const libDir = path.join(userDataPath, 'library');
   const audioDir = path.join(libDir, 'audio');
   const midiDir = path.join(libDir, 'midi');
-  if (!fs.existsSync(libDir)) fs.mkdirSync(libDir);
-  if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir);
-  if (!fs.existsSync(midiDir)) fs.mkdirSync(midiDir);
-  return { libDir, audioDir, midiDir };
+  const lyricsDir = path.join(libDir, 'lyrics');
+  if (!fs.existsSync(libDir)) fs.mkdirSync(libDir, { recursive: true });
+  if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
+  if (!fs.existsSync(midiDir)) fs.mkdirSync(midiDir, { recursive: true });
+  if (!fs.existsSync(lyricsDir)) fs.mkdirSync(lyricsDir, { recursive: true });
+  return { libDir, audioDir, midiDir, lyricsDir };
 }
 
 function copyFileToLibrary(
   userDataPath: string,
   srcPath: string,
-  destSubDir: 'audio' | 'midi',
+  destSubDir: 'audio' | 'midi' | 'lyrics',
   uuid: string,
 ) {
-  const { audioDir, midiDir } = ensureDirs(userDataPath);
+  const { audioDir, midiDir, lyricsDir } = ensureDirs(userDataPath);
   const ext = path.extname(srcPath);
   const baseName = path.basename(srcPath);
-  const destDir = destSubDir === 'audio' ? audioDir : midiDir;
+  let destDir: string;
+  if (destSubDir === 'audio') {
+    destDir = audioDir;
+  } else if (destSubDir === 'midi') {
+    destDir = midiDir;
+  } else {
+    destDir = lyricsDir;
+  }
   const destFilename = `${uuid}-${Date.now()}-${baseName}`;
   const destPath = path.join(destDir, destFilename);
+  
+  // Ensure source file exists
+  if (!fs.existsSync(srcPath)) {
+    throw new Error(`Source file not found: ${srcPath}`);
+  }
+  
   fs.copyFileSync(srcPath, destPath);
+  console.log(`[Library] Copied ${destSubDir} file: ${srcPath} -> ${destPath}`);
   return destPath;
 }
 
@@ -232,23 +249,38 @@ export async function importSong(userDataPath: string, payload: ImportPayload) {
 
   let audio_path: string | null = null;
   let midi_path: string | null = null;
+  let lyrics_path: string | null = null;
   try {
     if (payload.audioPath) {
+      console.log(`[importSong] Copying audio file: ${payload.audioPath}`);
       audio_path = copyFileToLibrary(
         userDataPath,
         payload.audioPath,
         'audio',
         uuid,
       );
+      console.log(`[importSong] Audio file copied to: ${audio_path}`);
     }
     if (payload.midiPath) {
+      console.log(`[importSong] Copying MIDI file: ${payload.midiPath}`);
       midi_path = copyFileToLibrary(
         userDataPath,
         payload.midiPath,
         'midi',
         uuid,
       );
+      console.log(`[importSong] MIDI file copied to: ${midi_path}`);
     }
+    if (payload.lyricsPath) {
+      // Lyrics path is already copied in batch import, just store it
+      lyrics_path = payload.lyricsPath;
+    }
+    
+    // Store lyrics path in metadata if provided
+    if (lyrics_path) {
+      metadata.lyrics_path = lyrics_path;
+    }
+    
     const id = db.saveProject({
       uuid,
       title,
@@ -355,11 +387,26 @@ export function attachMidi(projectId: number, midiPath: string) {
   }
 }
 
+// Alias for compatibility with main.js
+export function createProject(userDataPath: string, payload: ImportPayload) {
+  return importSong(userDataPath, payload);
+}
+
+// Alias for compatibility with main.js
+export function getAllProjects() {
+  return getLibrary();
+}
+
+export { copyFileToLibrary };
+
 export default {
   importSong,
+  createProject,
+  getAllProjects,
   saveAnalysisForProject,
   getLibrary,
   attachMidi,
   parseMidiAndSaveForProject,
   promoteToBenchmark,
+  copyFileToLibrary,
 };

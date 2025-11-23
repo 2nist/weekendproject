@@ -42,11 +42,7 @@ function resolveProgression(rawChords, genreProfile, keyContext, sectionType) {
     }
 
     // RULE 2: Functional Harmony Correction
-    const expectedFunction = theoryRules.getExpectedFunction(
-      i,
-      sectionType,
-      keyContext,
-    );
+    const expectedFunction = theoryRules.getExpectedFunction(i, sectionType, keyContext);
 
     if (expectedFunction === 'DOMINANT') {
       if (!isDominantQuality(rawChord, keyContext)) {
@@ -62,10 +58,7 @@ function resolveProgression(rawChords, genreProfile, keyContext, sectionType) {
       }
     } else if (expectedFunction === 'PREDOMINANT') {
       // Common error: F# heard instead of F in C major
-      if (
-        (rawChord.root === 'F#' || rawChord.root === 'Gb') &&
-        isDiatonic('F', keyContext)
-      ) {
+      if ((rawChord.root === 'F#' || rawChord.root === 'Gb') && isDiatonic('F', keyContext)) {
         const genreName = genreProfile.name || 'pop';
         const secondaryDominantUsage = genreProfile.secondary_dominant_usage || 0.2;
 
@@ -74,8 +67,7 @@ function resolveProgression(rawChords, genreProfile, keyContext, sectionType) {
           correctionContext.corrected = buildChord('F', 'major', 'F');
           correctionContext.justification.push({
             rule: 'genre_probability',
-            reasoning:
-              'Pop genre rarely uses F#. Corrected to F (IV) as predominant.',
+            reasoning: 'Pop genre rarely uses F#. Corrected to F (IV) as predominant.',
             genre_weight: 0.85,
           });
         } else {
@@ -93,10 +85,7 @@ function resolveProgression(rawChords, genreProfile, keyContext, sectionType) {
     // RULE 3: Cadence Detection & Enforcement
     if (i >= rawChords.length - 2) {
       // Near end of phrase
-      const cadenceType = theoryRules.detectCadenceContext(
-        rawChords.slice(i - 1),
-        keyContext,
-      );
+      const cadenceType = theoryRules.detectCadenceContext(rawChords.slice(i - 1), keyContext);
 
       if (cadenceType === 'AUTHENTIC_EXPECTED') {
         if (!isTonicChord(rawChord, keyContext)) {
@@ -115,24 +104,14 @@ function resolveProgression(rawChords, genreProfile, keyContext, sectionType) {
     if (i > 0) {
       const prevChord = correctedProgression[correctedProgression.length - 1]?.chord;
       if (prevChord) {
-        const voiceLeadingCost = theoryRules.calculateVoiceLeading(
-          prevChord,
-          rawChord,
-        );
+        const voiceLeadingCost = theoryRules.calculateVoiceLeading(prevChord, rawChord);
 
         const threshold = 20; // Adjust based on testing
         if (voiceLeadingCost > threshold) {
-          const alternateCandidates = findSmootherAlternatives(
-            prevChord,
-            rawChord,
-            keyContext,
-          );
+          const alternateCandidates = findSmootherAlternatives(prevChord, rawChord, keyContext);
 
           for (const candidate of alternateCandidates) {
-            const candidateCost = theoryRules.calculateVoiceLeading(
-              prevChord,
-              candidate.chord,
-            );
+            const candidateCost = theoryRules.calculateVoiceLeading(prevChord, candidate.chord);
 
             if (candidateCost < voiceLeadingCost * 0.5) {
               correctionContext.corrected = candidate.chord;
@@ -149,10 +128,7 @@ function resolveProgression(rawChords, genreProfile, keyContext, sectionType) {
     }
 
     // RULE 5: Harmonic Rhythm Consistency
-    const sectionHarmonicRhythm = theoryRules.getSectionHarmonicRhythm(
-      sectionType,
-      genreProfile,
-    );
+    const sectionHarmonicRhythm = theoryRules.getSectionHarmonicRhythm(sectionType, genreProfile);
 
     if (rawChord.duration < sectionHarmonicRhythm.min_duration) {
       if (rawChord.confidence < 0.7) {
@@ -216,9 +192,8 @@ function resolveProgression(rawChords, genreProfile, keyContext, sectionType) {
     }
 
     // Finalize correction
-    const finalChord = correctionContext.corrected !== null
-      ? correctionContext.corrected
-      : rawChord;
+    const finalChord =
+      correctionContext.corrected !== null ? correctionContext.corrected : rawChord;
 
     // Calculate post-correction probability
     const finalProbability = calculateFinalProbability(
@@ -228,7 +203,10 @@ function resolveProgression(rawChords, genreProfile, keyContext, sectionType) {
     );
 
     // Skip if flagged for deletion
-    if (correctionContext.corrected === null && correctionContext.justification.some(j => j.rule === 'harmonic_rhythm_consistency')) {
+    if (
+      correctionContext.corrected === null &&
+      correctionContext.justification.some((j) => j.rule === 'harmonic_rhythm_consistency')
+    ) {
       continue;
     }
 
@@ -242,8 +220,8 @@ function resolveProgression(rawChords, genreProfile, keyContext, sectionType) {
         correction_applied: correctionContext.corrected !== null,
         original_chord: rawChord.root + (rawChord.quality || ''),
         corrected_chord: finalChord.root + (finalChord.quality || ''),
-        reasoning: correctionContext.justification.map(j => j.reasoning).join('; '),
-        rules_applied: correctionContext.justification.map(j => j.rule),
+        reasoning: correctionContext.justification.map((j) => j.reasoning).join('; '),
+        rules_applied: correctionContext.justification.map((j) => j.rule),
         genre_weight: correctionContext.justification[0]?.genre_weight || 0,
       },
       functional_analysis: {
@@ -276,9 +254,13 @@ function findDominantCandidates(rawChord, keyContext) {
   // Find dominant function chords that match bass note
   const key = keyContext.primary_key || 'C';
   const dominant = getDominantOfKey(key);
-  
+
   return [
-    { chord: buildChord(dominant, 'dominant7', rawChord.bass_note), reason: `V7 in ${key} major`, weight: 0.9 },
+    {
+      chord: buildChord(dominant, 'dominant7', rawChord.bass_note),
+      reason: `V7 in ${key} major`,
+      weight: 0.9,
+    },
   ];
 }
 
@@ -381,7 +363,7 @@ function getDominantOfKey(key) {
 function getChordSequenceForSection(linearAnalysis, section) {
   const timeRange = section.time_range || section;
   const chords = [];
-  
+
   if (linearAnalysis.events) {
     for (const event of linearAnalysis.events) {
       if (
@@ -389,18 +371,45 @@ function getChordSequenceForSection(linearAnalysis, section) {
         event.timestamp >= timeRange.start_time &&
         event.timestamp < timeRange.end_time
       ) {
-        const root = event.chord_candidate?.root_candidates?.[0]?.root || 
-                     event.chord?.root || 
-                     event.chord || 
-                     'C';
-        const quality = event.chord_candidate?.quality_candidates?.[0]?.quality ||
-                       event.chord?.quality ||
-                       'major';
-        chords.push({ root, quality, timestamp: event.timestamp });
+        // Enhanced: Use chord_quality and chord_inversion from enhanced Librosa analysis
+        let root = event.chord_candidate?.root_candidates?.[0]?.root || event.chord?.root || 'C';
+        let quality =
+          event.chord_quality ||
+          event.chord_candidate?.quality_candidates?.[0]?.quality ||
+          event.chord?.quality ||
+          'major';
+
+        // Parse chord name if available (e.g., "Cmaj7")
+        if (event.chord && typeof event.chord === 'string') {
+          const chordMatch = event.chord.match(/^([A-G][#b]?)(.*)$/);
+          if (chordMatch) {
+            root = chordMatch[1];
+            const qualityStr = chordMatch[2];
+            if (qualityStr) {
+              if (qualityStr.includes('maj7') || qualityStr.includes('M7')) quality = 'major7';
+              else if (qualityStr.includes('m7')) quality = 'minor7';
+              else if (qualityStr.includes('7') && !qualityStr.includes('m')) quality = 'dominant7';
+              else if (qualityStr.includes('sus')) quality = 'suspended';
+              else if (qualityStr.includes('m') || qualityStr.includes('min')) quality = 'minor';
+              else quality = 'major';
+            }
+          }
+        }
+
+        const inversion = event.chord_inversion !== undefined ? event.chord_inversion : 0;
+        const confidence = event.confidence !== undefined ? event.confidence : 0.5;
+
+        chords.push({
+          root,
+          quality,
+          inversion,
+          confidence,
+          timestamp: event.timestamp,
+        });
       }
     }
   }
-  
+
   return chords;
 }
 
@@ -411,7 +420,19 @@ function computeDurationBars(section, linearAnalysis) {
   const timeRange = section.time_range || section;
   const duration = timeRange.end_time - timeRange.start_time;
   const tempoBpm = linearAnalysis?.beat_grid?.tempo_bpm || 120;
-  const beatsPerBar = 4; // Default 4/4
+
+  // Enhanced: Use detected time signature from linear_analysis
+  let beatsPerBar = 4; // Default 4/4
+  const timeSig = linearAnalysis?.beat_grid?.time_signature;
+  if (typeof timeSig === 'string' && timeSig.includes('/')) {
+    const parts = timeSig.split('/');
+    const num = parseInt(parts[0], 10);
+    if (!isNaN(num) && num > 0) beatsPerBar = num;
+  } else if (timeSig && typeof timeSig === 'object') {
+    const num = Number(timeSig?.numerator || timeSig?.num || timeSig?.beatsPerBar);
+    if (!isNaN(num) && num > 0) beatsPerBar = num;
+  }
+
   const bars = (duration * tempoBpm) / (60 * beatsPerBar);
   return bars;
 }
@@ -422,16 +443,19 @@ function computeDurationBars(section, linearAnalysis) {
 function mergeTwoSections(sectionA, sectionB) {
   const timeRangeA = sectionA.time_range || sectionA;
   const timeRangeB = sectionB.time_range || sectionB;
-  
+
   return {
     ...sectionA,
     time_range: {
       start_time: Math.min(timeRangeA.start_time, timeRangeB.start_time),
       end_time: Math.max(timeRangeA.end_time, timeRangeB.end_time),
-      duration_bars: (Math.max(timeRangeA.end_time, timeRangeB.end_time) - 
-                     Math.min(timeRangeA.start_time, timeRangeB.start_time)) / 2, // Approximate
+      duration_bars:
+        (Math.max(timeRangeA.end_time, timeRangeB.end_time) -
+          Math.min(timeRangeA.start_time, timeRangeB.start_time)) /
+        2, // Approximate
     },
-    section_id: sectionA.section_id || `merged-${sectionA.section_id || 'A'}-${sectionB.section_id || 'B'}`,
+    section_id:
+      sectionA.section_id || `merged-${sectionA.section_id || 'A'}-${sectionB.section_id || 'B'}`,
     section_label: sectionA.section_label || sectionB.section_label || 'merged',
   };
 }
@@ -440,19 +464,34 @@ function mergeTwoSections(sectionA, sectionB) {
  * Apply theory corrections to a structural map
  * CRITICAL: This function must actually modify section boundaries based on cadences
  */
-async function correctStructuralMap(structuralMap, linearAnalysis, metadata, progressCallback = () => {}) {
+async function correctStructuralMap(
+  structuralMap,
+  linearAnalysis,
+  metadata,
+  progressCallback = () => {},
+) {
   logger.pass3('[Theorist] 🔵 Pass 3: Starting theory correction...');
   logger.pass3('[Theorist] Input sections:', structuralMap?.sections?.length || 0);
-  
+
   if (!structuralMap || !structuralMap.sections || structuralMap.sections.length === 0) {
     logger.warn('[Theorist] ⚠️ No sections to correct, returning original');
     return structuralMap || { sections: [] };
   }
-  
+
   const genreProfile = getGenreProfile(metadata.genre_hint || 'pop');
+  
+  // Enhanced: Prioritize detected values from Librosa analysis
+  const detectedKey = linearAnalysis?.metadata?.detected_key;
+  const detectedMode = linearAnalysis?.metadata?.detected_mode;
+  const keyConfidence = linearAnalysis?.metadata?.key_confidence || 0;
+  
+  logger.pass1(
+    `[Theorist] Key detection - Detected: ${detectedKey || 'NOT SET'} ${detectedMode || 'NOT SET'} (${Math.round(keyConfidence * 100)}%), Hint: ${metadata.key_hint || 'none'}`,
+  );
+  
   const keyContext = {
-    primary_key: metadata.key_hint || linearAnalysis?.metadata?.detected_key || 'C',
-    mode: metadata.mode_hint || linearAnalysis?.metadata?.detected_mode || 'ionian',
+    primary_key: metadata.key_hint || detectedKey || 'C',
+    mode: metadata.mode_hint || detectedMode || 'ionian',
   };
   
   logger.debug('[Theorist] Key context:', keyContext.primary_key, keyContext.mode);
@@ -464,12 +503,11 @@ async function correctStructuralMap(structuralMap, linearAnalysis, metadata, pro
     progressCallback((sectionIndex / structuralMap.sections.length) * 50); // First 50% for chord correction
 
     // Extract raw chords for this section from linear analysis
-    const sectionChords = extractSectionChords(
-      linearAnalysis,
-      section.time_range,
-    );
+    const sectionChords = extractSectionChords(linearAnalysis, section.time_range);
 
-    logger.debug(`[Theorist] Section ${sectionIndex + 1} (${section.section_label || 'unknown'}): ${sectionChords.length} chords`);
+    logger.debug(
+      `[Theorist] Section ${sectionIndex + 1} (${section.section_label || 'unknown'}): ${sectionChords.length} chords`,
+    );
 
     // Apply theory corrections to chords
     const correctedProgression = resolveProgression(
@@ -489,10 +527,10 @@ async function correctStructuralMap(structuralMap, linearAnalysis, metadata, pro
         mode: keyContext.mode,
       },
     });
-    
+
     // Allow event loop to process every 5 sections
     if (sectionIndex % 5 === 0) {
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
     }
   }
 
@@ -510,30 +548,36 @@ async function correctStructuralMap(structuralMap, linearAnalysis, metadata, pro
     for (let i = 0; i < working.length - 1; i++) {
       const sectionA = working[i];
       const sectionB = working[i + 1];
-      
+
       const aBars = computeDurationBars(sectionA, linearAnalysis);
       const bBars = computeDurationBars(sectionB, linearAnalysis);
       const isShort = aBars < minBarsForMerge || bBars < minBarsForMerge;
-      
+
       // Get chord sequences at boundary
       const leftSeq = getChordSequenceForSection(linearAnalysis, sectionA);
       const rightSeq = getChordSequenceForSection(linearAnalysis, sectionB);
       const lastTwoLeft = leftSeq.slice(-2);
       const firstTwoRight = rightSeq.slice(0, 2);
       const combined = [...lastTwoLeft, ...firstTwoRight].filter(Boolean);
-      
+
       // Check for cadence at boundary
       const cadence = theoryRules.detectCadenceContext(combined, keyContext);
-      
+
       logger.debug(`[Theorist] Checking boundary between Section ${i + 1} and ${i + 2}:`);
-      logger.debug(`[Theorist]   Section A: ${aBars.toFixed(1)} bars, Section B: ${bBars.toFixed(1)} bars`);
+      logger.debug(
+        `[Theorist]   Section A: ${aBars.toFixed(1)} bars, Section B: ${bBars.toFixed(1)} bars`,
+      );
       logger.debug(`[Theorist]   Cadence: ${cadence}`);
-      logger.debug(`[Theorist]   Last 2 chords of A: ${lastTwoLeft.map(c => c.root).join(', ')}`);
-      logger.debug(`[Theorist]   First 2 chords of B: ${firstTwoRight.map(c => c.root).join(', ')}`);
-      
+      logger.debug(`[Theorist]   Last 2 chords of A: ${lastTwoLeft.map((c) => c.root).join(', ')}`);
+      logger.debug(
+        `[Theorist]   First 2 chords of B: ${firstTwoRight.map((c) => c.root).join(', ')}`,
+      );
+
       // Merge if no cadence and one section is short
       if (cadence === 'NONE' && isShort) {
-        logger.pass3(`[Theorist] ✅ MERGING: No cadence detected and section is short (${aBars.toFixed(1)}/${bBars.toFixed(1)} bars)`);
+        logger.pass3(
+          `[Theorist] ✅ MERGING: No cadence detected and section is short (${aBars.toFixed(1)}/${bBars.toFixed(1)} bars)`,
+        );
         const merged = mergeTwoSections(sectionA, sectionB);
         working.splice(i, 2, merged);
         changed = true;
@@ -542,18 +586,24 @@ async function correctStructuralMap(structuralMap, linearAnalysis, metadata, pro
       } else if (cadence !== 'NONE') {
         logger.debug(`[Theorist] ✅ VALID: Cadence detected (${cadence}) - keeping boundary`);
       } else {
-        logger.debug(`[Theorist] ℹ️ KEEPING: Both sections are long enough (${aBars.toFixed(1)}/${bBars.toFixed(1)} bars)`);
+        logger.debug(
+          `[Theorist] ℹ️ KEEPING: Both sections are long enough (${aBars.toFixed(1)}/${bBars.toFixed(1)} bars)`,
+        );
       }
     }
-    
+
     // Allow event loop to process
     if (changed) {
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
     }
   }
 
-  logger.pass3(`[Theorist] ✅ Section boundary correction complete. Merged ${mergeCount} boundaries.`);
-  logger.pass3(`[Theorist] Final section count: ${working.length} (was ${correctedSections.length})`);
+  logger.pass3(
+    `[Theorist] ✅ Section boundary correction complete. Merged ${mergeCount} boundaries.`,
+  );
+  logger.pass3(
+    `[Theorist] Final section count: ${working.length} (was ${correctedSections.length})`,
+  );
 
   progressCallback(90);
 
@@ -564,7 +614,7 @@ async function correctStructuralMap(structuralMap, linearAnalysis, metadata, pro
   );
 
   progressCallback(100);
-  
+
   logger.pass3('[Theorist] ✅ Pass 3 Complete!');
 
   return {
@@ -575,21 +625,58 @@ async function correctStructuralMap(structuralMap, linearAnalysis, metadata, pro
 
 function extractSectionChords(linearAnalysis, timeRange) {
   // Extract chord candidates from linear analysis events within time range
+  // Enhanced to use chord_quality, chord_inversion, and enhanced confidence from Librosa
   const chords = [];
 
   if (linearAnalysis.events) {
     for (const event of linearAnalysis.events) {
       if (
-        event.event_type === 'chord_candidate' &&
+        (event.event_type === 'chord_candidate' || event.event_type === 'chord') &&
         event.timestamp >= timeRange.start_time &&
         event.timestamp < timeRange.end_time
       ) {
+        // Enhanced: Use chord_quality and chord_inversion from enhanced Librosa analysis
+        const enhancedQuality =
+          event.chord_quality || event.chord_candidate?.quality_candidates?.[0]?.quality || 'major';
+        const enhancedInversion = event.chord_inversion !== undefined ? event.chord_inversion : 0;
+
+        // Enhanced: Use actual confidence from Librosa (not fixed 0.5)
+        const enhancedConfidence =
+          event.confidence !== undefined
+            ? event.confidence
+            : event.chord_candidate?.root_candidates?.[0]?.probability || 0.5;
+
+        // Parse chord name if available (e.g., "Cmaj7", "Dm7")
+        let root = 'C';
+        let quality = enhancedQuality;
+
+        if (event.chord) {
+          // Try to parse chord name (e.g., "Cmaj7" -> root="C", quality="major7")
+          const chordMatch = event.chord.match(/^([A-G][#b]?)(.*)$/);
+          if (chordMatch) {
+            root = chordMatch[1];
+            const qualityStr = chordMatch[2];
+            if (qualityStr) {
+              // Map common chord suffixes
+              if (qualityStr.includes('maj7') || qualityStr.includes('M7')) quality = 'major7';
+              else if (qualityStr.includes('m7')) quality = 'minor7';
+              else if (qualityStr.includes('7') && !qualityStr.includes('m')) quality = 'dominant7';
+              else if (qualityStr.includes('sus')) quality = 'suspended';
+              else if (qualityStr.includes('m') || qualityStr.includes('min')) quality = 'minor';
+              else quality = 'major';
+            }
+          }
+        } else {
+          root = event.chord_candidate?.root_candidates?.[0]?.root || event.chord?.root || 'C';
+        }
+
         chords.push({
-          root: event.chord_candidate?.root_candidates?.[0]?.root || 'C',
-          quality: event.chord_candidate?.quality_candidates?.[0]?.quality || 'major',
-          bass_note: event.chord_candidate?.bass_note || 'C',
+          root,
+          quality,
+          bass_note: event.chord_candidate?.bass_note || root,
           bass_ambiguity_flag: event.chord_candidate?.bass_ambiguity_flag || false,
-          confidence: event.confidence || 0.5,
+          confidence: enhancedConfidence,
+          inversion: enhancedInversion,
           duration_beats: 4, // TODO: Calculate from timestamps
           position_in_bar: 1, // TODO: Calculate from beat grid
         });
@@ -604,4 +691,3 @@ module.exports = {
   resolveProgression,
   correctStructuralMap,
 };
-

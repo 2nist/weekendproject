@@ -49,6 +49,7 @@ export interface BeatCardProps
   hasConflict?: boolean; // True if engines disagreed
   isAttack?: boolean; // True if chord starts here (new chord)
   isSustain?: boolean; // True if chord continues from previous beat
+  isActive?: boolean; // True if this beat is currently playing
 }
 
 // 3. The Component
@@ -74,6 +75,7 @@ export const BeatCard = ({
   hasConflict = false,
   isAttack = false,
   isSustain = false,
+  isActive = false,
   ...props
 }: BeatCardProps) => {
   // Handle paint mode - trigger paint on mouse enter while dragging
@@ -139,7 +141,10 @@ export const BeatCard = ({
           'border-t-[6px] border-t-music-snare shadow-[0_-8px_16px_hsl(var(--music-snare)/0.3)]',
         // Sustain state: dimmed and recessed
         isSustain && 'opacity-40 brightness-75 scale-95',
-        // Active playback highlight
+        // Active playback highlight (semi-sync)
+        isActive &&
+          'ring-2 ring-white shadow-lg scale-105 z-20 animate-pulse',
+        // Legacy isPlaying highlight (keep for compatibility)
         isPlaying &&
           'ring-2 ring-music-kick ring-offset-2 ring-offset-background shadow-[0_0_20px_hsl(var(--music-kick)/0.6)] scale-105 z-20',
         // Paint mode cursor

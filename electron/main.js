@@ -1,5 +1,6 @@
 const electron = require('electron');
 const path = require('path');
+const fs = require('fs');
 const db = require('./db');
 const midiListener = require('./midiListener');
 const trackResolver = require('./trackResolver');
@@ -15,9 +16,9 @@ const architect = require('./analysis/architect_canonical_final');
 let architectV2 = null;
 try {
   architectV2 = require('./analysis/architect_v2');
-  console.log('✅ Architect V2 loaded successfully');
+  console.log('Architect V2 loaded successfully');
 } catch (e) {
-  console.warn('⚠️ Architect V2 not available, falling back to clean version:', e.message);
+  console.warn('Architect V2 not available, falling back to clean version:', e.message);
 }
 const theorist = require('./analysis/theorist');
 // Engine Config (calibrated parameters)
@@ -26,18 +27,18 @@ try {
   require('ts-node').register({ transpileOnly: true });
   const ec = require('./config/engineConfig.ts');
   engineConfig = ec;
-  console.log('✅ EngineConfig loaded successfully');
+  console.log('EngineConfig loaded successfully');
 } catch (e) {
   try {
     engineConfig = require('./config/engineConfig');
   } catch (e2) {
-    console.warn('⚠️ EngineConfig not available:', e2?.message || e?.message);
+    console.warn('EngineConfig not available:', e2?.message || e?.message);
   }
 }
 // Calibration Service - lazy load helper
 function loadCalibrationService() {
   if (calibrationService) return calibrationService;
-  
+
   try {
     try {
       require('ts-node').register({ transpileOnly: true });
@@ -57,27 +58,30 @@ function loadCalibrationService() {
     } else {
       calibrationService = cs;
     }
-    console.log('✅ CalibrationService loaded successfully');
-    console.log('✅ CalibrationService type:', typeof calibrationService);
-    console.log('✅ CalibrationService methods:', calibrationService ? Object.keys(calibrationService) : 'null');
+    console.log('CalibrationService loaded successfully');
+    console.log('CalibrationService type:', typeof calibrationService);
+    console.log(
+      'CalibrationService methods:',
+      calibrationService ? Object.keys(calibrationService) : 'null',
+    );
     if (calibrationService) {
-      console.log('✅ getBenchmarks:', typeof calibrationService.getBenchmarks);
-      console.log('✅ runCalibration:', typeof calibrationService.runCalibration);
+      console.log('getBenchmarks:', typeof calibrationService.getBenchmarks);
+      console.log('runCalibration:', typeof calibrationService.runCalibration);
     }
     return calibrationService;
   } catch (err) {
-    console.error('⚠️ Failed to load CalibrationService (TS):', err?.message || err);
-    console.error('⚠️ Stack:', err?.stack);
+    console.error('Failed to load CalibrationService (TS):', err?.message || err);
+    console.error('Stack:', err?.stack);
     try {
       const cs = require('./services/calibration');
       calibrationService = cs && cs.default ? cs.default : cs;
       if (calibrationService) {
-        console.log('✅ CalibrationService loaded (JS fallback)');
+        console.log('CalibrationService loaded (JS fallback)');
       }
       return calibrationService;
     } catch (e2) {
-      console.warn('⚠️ CalibrationService not available:', e2?.message || e2);
-      console.warn('⚠️ Stack:', e2?.stack);
+      console.warn('CalibrationService not available:', e2?.message || e2);
+      console.warn('Stack:', e2?.stack);
       return null;
     }
   }
@@ -88,7 +92,7 @@ let calibrationService = null;
 try {
   calibrationService = loadCalibrationService();
 } catch (e) {
-  console.warn('⚠️ CalibrationService initial load failed, will try lazy load:', e.message);
+  console.warn('CalibrationService initial load failed, will try lazy load:', e.message);
 }
 const fileProcessor = require('./analysis/fileProcessor');
 const progressTracker = require('./analysis/progressTracker');
@@ -117,9 +121,20 @@ try {
   } catch (e) {}
   const libTS = require('./services/library.ts');
   libraryService = libTS && libTS.default ? libTS.default : libTS;
+  console.log('[MAIN] Library service loaded (TypeScript)');
 } catch (err) {
-  const libJS = require('./services/library');
-  libraryService = libJS && libJS.default ? libJS.default : libJS;
+  try {
+    const libJS = require('./services/library');
+    libraryService = libJS && libJS.default ? libJS.default : libJS;
+    console.log('[MAIN] Library service loaded (JavaScript)');
+  } catch (err2) {
+    console.error('[MAIN] Failed to load library service:', err2.message);
+    libraryService = null;
+  }
+}
+
+if (!libraryService) {
+  console.warn('[MAIN] Library service is null - library features may not work');
 }
 
 const app = electron.app;
@@ -144,6 +159,30 @@ let currentBlocks = []; // Store current blocks to persist across requests
 // In-memory cache for preview changes (not yet committed to DB)
 const previewAnalysisCache = new Map(); // fileHash -> analysis object
 
+// Helper function to ensure blocks have complete data structure
+function ensureBlockData(block) {
+  return {
+    id: block.id || block.section_id || `section-${Date.now()}`,
+    name: block.name || block.section_label || 'Section',
+    label: block.label || block.section_label || 'Section',
+    length: block.length || block.bars || 4,
+    bars: block.bars || block.length || 4,
+    section_label: block.section_label,
+    section_variant: block.section_variant,
+    harmonic_dna: block.harmonic_dna || {},
+    rhythmic_dna: block.rhythmic_dna || {},
+    time_range: block.time_range,
+    probability_score: block.probability_score !== undefined ? block.probability_score : 0.5,
+    semantic_signature: block.semantic_signature || {},
+  };
+}
+
+// did-finish-load guard to avoid reload loops
+let didFinishLoadCount = 0;
+let lastDidFinishLoadTs = 0;
+const DID_FINISH_LOAD_MAX = 5; // maximum allowed did-finish-load events in window
+const DID_FINISH_LOAD_WINDOW_MS = 15000; // window duration for counting
+
 const status = {
   bpm: 120,
   isPlaying: false,
@@ -152,6 +191,13 @@ const status = {
 };
 
 function createWindow() {
+  // Prevent creating multiple windows if one exists
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.focus();
+    } catch (e) {}
+    return mainWindow;
+  }
   mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
@@ -164,6 +210,11 @@ function createWindow() {
     backgroundColor: '#0f172a',
   });
 
+  // Reset did-finish-load counter when we create a new window
+  didFinishLoadCount = 0;
+  lastDidFinishLoadTs = Date.now();
+  console.log('[MAIN] Created mainWindow at', new Date().toISOString());
+
   if (app.isPackaged || process.env.NODE_ENV === 'production') {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   } else {
@@ -173,39 +224,83 @@ function createWindow() {
     const maxRetries = 40;
     const retryInterval = 250; // ms
     let attempts = 0;
+    let loaded = false; // Prevent multiple loads
 
     const tryLoad = () => {
+      if (loaded) return; // Already loaded successfully
       attempts++;
-      const req = http.request(
-        devUrl,
-        { method: 'HEAD', timeout: 2000 },
-        (res) => {
-          if (res.statusCode >= 200 && res.statusCode < 400) {
-            mainWindow.loadURL(devUrl);
-            mainWindow.webContents.openDevTools();
-          } else if (attempts < maxRetries) {
-            setTimeout(tryLoad, retryInterval);
-          } else {
-            // Last resort: still try to load
-            mainWindow.loadURL(devUrl);
-            mainWindow.webContents.openDevTools();
-          }
-        },
-      );
+      const req = http.request(devUrl, { method: 'HEAD', timeout: 2000 }, (res) => {
+        if (loaded) return; // Race condition guard
+        if (res.statusCode >= 200 && res.statusCode < 400) {
+          loaded = true; // Mark as loaded to stop retries
+          mainWindow.loadURL(devUrl);
+          mainWindow.webContents.openDevTools({ mode: 'detach' });
+
+          mainWindow.webContents.once('devtools-opened', () => {
+            console.log('[MAIN] DevTools opened - configuring to prevent auto-reload');
+          });
+        } else if (attempts < maxRetries) {
+          setTimeout(tryLoad, retryInterval);
+        } else {
+          // Last resort: still try to load
+          loaded = true;
+          mainWindow.loadURL(devUrl);
+          mainWindow.webContents.openDevTools({ mode: 'detach' });
+        }
+      });
       req.on('error', () => {
+        if (loaded) return;
         if (attempts < maxRetries) setTimeout(tryLoad, retryInterval);
-        else mainWindow.loadURL(devUrl);
+        else {
+          loaded = true;
+          mainWindow.loadURL(devUrl);
+          mainWindow.webContents.openDevTools({ mode: 'detach' });
+        }
       });
       req.on('timeout', () => {
         req.destroy();
+        if (loaded) return;
         if (attempts < maxRetries) setTimeout(tryLoad, retryInterval);
-        else mainWindow.loadURL(devUrl);
+        else {
+          loaded = true;
+          mainWindow.loadURL(devUrl);
+          mainWindow.webContents.openDevTools({ mode: 'detach' });
+        }
       });
       req.end();
     };
 
     tryLoad();
   }
+
+  // Ensure we properly null the mainWindow reference when it's closed
+  mainWindow.on('closed', () => {
+    console.log('[MAIN] mainWindow closed');
+    try {
+      mainWindow = null;
+    } catch (e) {}
+  });
+
+  // Handle renderer process exits (crashes or kills) gracefully and log details
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    console.error('[MAIN] Renderer process gone:', details);
+    // Do not auto-reload the window - instead log and notify dev
+    if (details.reason === 'crashed' || details.reason === 'killed') {
+      broadcastLog(
+        `[MAIN] Renderer crash detected: ${details.reason} - ${details.reasonCode || ''}`,
+      );
+    }
+  });
+
+  // Forward renderer console messages to main process logs for debugging reload causes
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    console.log(`[RENDER] (${level}) ${message} (line:${line} src:${sourceId})`);
+  });
+
+  // Optional - log when the window is unresponsive to help diagnose reloads
+  mainWindow.on('unresponsive', () => {
+    console.warn('[MAIN] Window unresponsive');
+  });
 }
 
 function broadcastStatus() {
@@ -218,7 +313,7 @@ function broadcastStatus() {
 function broadcastLog(message) {
   // Log to terminal (standard console output)
   console.log(message);
-  
+
   // Send to renderer process (DevTools console)
   if (mainWindow && !mainWindow.isDestroyed()) {
     try {
@@ -231,6 +326,65 @@ function broadcastLog(message) {
 }
 
 app.whenReady().then(async () => {
+  // Register custom media protocol for secure audio file serving
+  const { protocol } = require('electron');
+  console.log('[MAIN] Registering media protocol...');
+  protocol.registerFileProtocol('media', (request, callback) => {
+    console.log('[MEDIA PROTOCOL] Request:', request.url);
+    const url = request.url.replace('media://', '');
+    // URL format: media://project-id/song.mp3
+    const parts = url.split('/');
+    if (parts.length < 2) {
+      console.warn('[MEDIA PROTOCOL] Invalid URL format:', url);
+      callback({ error: -6 }); // FILE_NOT_FOUND
+      return;
+    }
+
+    const projectId = parts[0];
+    const filename = parts.slice(1).join('/');
+    console.log('[MEDIA PROTOCOL] Project ID:', projectId, 'Filename:', filename);
+
+    try {
+      // Try to get the actual audio_path from the project in the database
+      const database = db.getDb();
+      let audioPath = null;
+      
+      if (database) {
+        try {
+          const projectStmt = database.prepare('SELECT audio_path FROM Projects WHERE id = ?');
+          projectStmt.bind([projectId]);
+          if (projectStmt.step()) {
+            const row = projectStmt.getAsObject();
+            audioPath = row.audio_path;
+          }
+          projectStmt.free();
+        } catch (dbErr) {
+          console.warn('[MEDIA PROTOCOL] Database lookup failed:', dbErr);
+        }
+      }
+      
+      // Fallback: try to resolve from filename in library/audio directory
+      if (!audioPath || !fs.existsSync(audioPath)) {
+        const userDataPath = app.getPath('userData');
+        audioPath = path.join(userDataPath, 'library', 'audio', filename);
+      }
+      
+      console.log('[MEDIA PROTOCOL] Resolved path:', audioPath);
+
+      // Verify file exists
+      if (fs.existsSync(audioPath)) {
+        console.log('[MEDIA PROTOCOL] File found, serving:', audioPath);
+        callback({ path: audioPath });
+      } else {
+        console.warn('[MEDIA PROTOCOL] File not found:', audioPath);
+        callback({ error: -6 }); // FILE_NOT_FOUND
+      }
+    } catch (error) {
+      console.error('[MEDIA PROTOCOL] Error:', error);
+      callback({ error: -2 }); // FAILED
+    }
+  });
+
   await db.init(app);
 
   let settings = db.getSettings();
@@ -240,7 +394,11 @@ app.whenReady().then(async () => {
   }
 
   trackResolver.init(db.getDb());
-  trackResolver.startMockUpdates();
+  // NOTE: `startMockUpdates` performs periodic writes to the database for testing.
+  // In development this triggers Vite file watchers and causes a full hard-reload
+  // (which resets the UI and reloads routes). To avoid the continuous reload
+  // loop during typical development, we leave this disabled by default.
+  // trackResolver.startMockUpdates();
 
   oscClients = {
     reaper: new osc.Client('127.0.0.1', settings.reaper_port),
@@ -252,23 +410,36 @@ app.whenReady().then(async () => {
     const lastAnalysis = db.getMostRecentAnalysis();
     if (lastAnalysis && lastAnalysis.structural_map && lastAnalysis.structural_map.sections) {
       const sections = lastAnalysis.structural_map.sections;
-      currentBlocks = sections.map((section, index) => ({
-        id: section.id || `section-${index}`,
-        label: section.label || section.section_label || 'Unknown',
-        bars: section.bars || 4,
-        time_range: section.time_range,
-        probability_score: section.probability_score || 0.8,
-      }));
-      console.log(`✅ Restored ${currentBlocks.length} blocks from last analysis on startup`);
+      currentBlocks = sections.map((section, index) => {
+        const duration = section.time_range
+          ? section.time_range.end_time - section.time_range.start_time
+          : 4; // Default 4 bars
+        const bars = Math.max(1, Math.round(duration / 2)); // Approximate bars (assuming 2 seconds per bar)
+
+        return {
+          id: section.section_id || section.id || `section-${index}`,
+          name: section.section_label || 'Section',
+          label: section.section_label || section.label || 'Section',
+          length: bars,
+          bars: bars,
+          section_label: section.section_label,
+          section_variant: section.section_variant,
+          harmonic_dna: section.harmonic_dna || {},
+          rhythmic_dna: section.rhythmic_dna || {},
+          time_range: section.time_range,
+          probability_score: section.probability_score || 0.5,
+          semantic_signature: section.semantic_signature || {},
+        };
+      });
+      console.log(`Restored ${currentBlocks.length} blocks from last analysis on startup`);
     } else {
-      console.log('ℹ️ No previous analysis found to restore');
+      console.log('No previous analysis found to restore');
     }
   } catch (error) {
-    console.warn('⚠️ Failed to restore last analysis:', error.message);
+    console.warn('Failed to restore last analysis:', error.message);
   }
 
-  const isDev =
-    process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
+  const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
 
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
@@ -285,6 +456,117 @@ app.whenReady().then(async () => {
   });
 
   createWindow();
+
+  // DEV: Watch for file changes on critical directories and log them so we can diagnose reloads
+  // Disabled by default to avoid watching Electron cache and userData (which triggers reload loops)
+  const enableDevWatcher = process.env.ENABLE_FILE_WATCHER === 'true';
+  if (!app.isPackaged && enableDevWatcher) {
+    try {
+      const fs = require('fs');
+      const pathModule = require('path');
+      const userDataPath = app.getPath('userData');
+      const cwd = process.cwd();
+      const watchTargets = [cwd];
+
+      const shouldIgnore = (p, filename) => {
+        if (!filename) return true;
+        const fullPath = pathModule.join(p, filename).toLowerCase();
+        // Exclude Electron caches, node_modules, and .git
+        const excludes = [
+          'appdata\\roaming',
+          'appdata/roaming',
+          'code cache',
+          'cache_data',
+          '\\cache\\',
+          '/cache/',
+          'node_modules',
+          '.git',
+          '\\dist\\',
+          '/dist/',
+          '\\results\\',
+          '/results/',
+          '\\benchmarks\\',
+          '/benchmarks/',
+          '\\.vscode\\',
+          '\\.idea\\',
+        ];
+        for (const ex of excludes) {
+          if (fullPath.includes(ex)) return true;
+        }
+        return false;
+      };
+
+      for (const p of watchTargets) {
+        try {
+          fs.watch(p, { recursive: true }, (eventType, filename) => {
+            if (!filename) return;
+            if (shouldIgnore(p, filename)) return;
+            const full = pathModule.join(p, filename);
+            console.log(`[DEV WATCHER] ${eventType} ${full}`);
+          });
+        } catch (err) {
+          console.warn('[MAIN] Dev watcher unable to watch', p, err?.message || err);
+        }
+      }
+      console.log('[MAIN] Dev file watcher ENABLED');
+    } catch (e) {
+      console.warn('[MAIN] Dev file watcher failed to initialize:', e?.message || e);
+    }
+  } else {
+    console.log('[MAIN] Dev file watcher DISABLED');
+  }
+
+  // Proactively push current blocks to newly created renderer to avoid 'UI:REQUEST_INITIAL' spam
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.on('did-finish-load', () => {
+      const now = Date.now();
+      if (now - lastDidFinishLoadTs > DID_FINISH_LOAD_WINDOW_MS) {
+        // Reset counter if a long time has passed since the last load
+        didFinishLoadCount = 0;
+      }
+      didFinishLoadCount++;
+      lastDidFinishLoadTs = now;
+      console.log(`[MAIN] did-finish-load #${didFinishLoadCount}`);
+      if (didFinishLoadCount > DID_FINISH_LOAD_MAX) {
+        console.error(
+          '[MAIN] Too many did-finish-load events detected - ignoring event to prevent loop.',
+        );
+        return;
+      }
+
+      // Only proactively push blocks on the initial load for this window
+      if (didFinishLoadCount === 1 && currentBlocks && currentBlocks.length > 0) {
+        const completeBlocks = currentBlocks.map(ensureBlockData);
+        console.log(
+          'UI:INIT: Pushing stored blocks to renderer on did-finish-load:',
+          completeBlocks.length,
+        );
+        try {
+          mainWindow.webContents.send('UI:BLOCKS_UPDATE', completeBlocks);
+        } catch (err) {
+          console.warn('UI:INIT: Failed to send blocks on did-finish-load', err?.message || err);
+        }
+      }
+    });
+
+    // Add navigation listeners to diagnose reload cause
+    mainWindow.webContents.on('will-navigate', (event, url) => {
+      console.log(`[MAIN] will-navigate to: ${url}`);
+      // Only block DevTools-initiated reloads, allow user navigation
+      if (url === devUrl && event.sender.getURL() === devUrl) {
+        console.log('[MAIN] Blocking DevTools auto-reload');
+        event.preventDefault();
+      }
+    });
+
+    mainWindow.webContents.on('did-navigate', (event, url) => {
+      console.log(`[MAIN] did-navigate to: ${url}`);
+    });
+
+    mainWindow.webContents.on('did-navigate-in-page', (event, url, isMainFrame) => {
+      console.log(`[MAIN] did-navigate-in-page to: ${url}, isMainFrame: ${isMainFrame}`);
+    });
+  }
 
   setInterval(broadcastStatus, 1000);
 
@@ -339,86 +621,140 @@ registerIpcHandler('LIBRARY:CREATE_PROJECT', async (event, payload) => {
 
 registerIpcHandler('LIBRARY:GET_PROJECTS', async () => {
   try {
+    if (!libraryService) {
+      console.error('[LIBRARY:GET_PROJECTS] Library service not initialized');
+      return { success: false, error: 'Library service not available', projects: [] };
+    }
+    if (!libraryService.getAllProjects) {
+      console.error('[LIBRARY:GET_PROJECTS] getAllProjects method not found');
+      return { success: false, error: 'Library service method not available', projects: [] };
+    }
     const projects = libraryService.getAllProjects();
-    return { success: true, projects };
+    return { success: true, projects: projects || [] };
+  } catch (error) {
+    console.error('[LIBRARY:GET_PROJECTS] Error:', error);
+    return { success: false, error: error.message || String(error), projects: [] };
+  }
+});
+
+// Path Configuration handlers
+registerIpcHandler('PATH:GET_CONFIG', async () => {
+  try {
+    const { getInstance } = require('./services/pathConfig');
+    const pathConfig = getInstance();
+    return { success: true, config: pathConfig.getFullConfig() };
   } catch (error) {
     return { success: false, error: error.message };
   }
 });
 
-registerIpcHandler(
-  'LIBRARY:ATTACH_MIDI',
-  async (event, { projectId, midiPath }) => {
-    try {
-      const userDataPath = app.getPath('userData');
-      // copy midi file to library and attach
-      const uuidProject = libraryService
-        .getAllProjects()
-        .find((p) => p.id === projectId)?.uuid;
-      const fs = require('fs');
-      const path = require('path');
-      if (!uuidProject) return { success: false, error: 'Project not found' };
-      const destDir = path.join(app.getPath('userData'), 'library', 'midi');
-      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-      const destFile = path.join(
-        destDir,
-        `${uuidProject}-${path.basename(midiPath)}`,
-      );
-      fs.copyFileSync(midiPath, destFile);
-      const attachRes = libraryService.attachMidi(projectId, destFile);
-      if (!attachRes || !attachRes.success) {
-        return { success: false, error: attachRes?.error || 'attach failed' };
-      }
-      return { success: true, midi_path: destFile };
-    } catch (error) {
-      return { success: false, error: error.message };
+registerIpcHandler('PATH:UPDATE_CONFIG', async (event, updates) => {
+  try {
+    const { getInstance } = require('./services/pathConfig');
+    const pathConfig = getInstance();
+    const result = pathConfig.updateConfig(updates);
+    return result;
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+registerIpcHandler('PATH:ENABLE_GOOGLE_DRIVE', async (event, googleDrivePath) => {
+  try {
+    const { getInstance } = require('./services/pathConfig');
+    const pathConfig = getInstance();
+    const result = pathConfig.enableGoogleDrive(googleDrivePath);
+    return result;
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+registerIpcHandler('PATH:DISABLE_CLOUD', async () => {
+  try {
+    const { getInstance } = require('./services/pathConfig');
+    const pathConfig = getInstance();
+    const result = pathConfig.disableCloud();
+    return result;
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+registerIpcHandler('PATH:SELECT_DIRECTORY', async (event, { title, defaultPath }) => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: title || 'Select Directory',
+      defaultPath: defaultPath || app.getPath('home'),
+      properties: ['openDirectory'],
+    });
+
+    if (result.canceled) {
+      return { success: false, canceled: true };
     }
-  },
-);
+
+    return { success: true, path: result.filePaths[0] };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+registerIpcHandler('LIBRARY:ATTACH_MIDI', async (event, { projectId, midiPath }) => {
+  try {
+    const userDataPath = app.getPath('userData');
+    // copy midi file to library and attach
+    const uuidProject = libraryService.getAllProjects().find((p) => p.id === projectId)?.uuid;
+    const fs = require('fs');
+    const path = require('path');
+    if (!uuidProject) return { success: false, error: 'Project not found' };
+    const destDir = path.join(app.getPath('userData'), 'library', 'midi');
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    const destFile = path.join(destDir, `${uuidProject}-${path.basename(midiPath)}`);
+    fs.copyFileSync(midiPath, destFile);
+    const attachRes = libraryService.attachMidi(projectId, destFile);
+    if (!attachRes || !attachRes.success) {
+      return { success: false, error: attachRes?.error || 'attach failed' };
+    }
+    return { success: true, midi_path: destFile };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 
 // Parse MIDI and attach/save analysis for a project
-registerIpcHandler(
-  'LIBRARY:PARSE_MIDI',
-  async (event, { projectId, midiPath }) => {
-    try {
-      if (!projectId || !midiPath) throw new Error('Missing parameters');
-      if (!libraryService || !libraryService.parseMidiAndSaveForProject) {
-        // Fallback: use midiParser directly and save
-        const res = midiParser.parseMidiToLinearAnalysis
-          ? midiParser.parseMidiToLinearAnalysis(midiPath)
-          : await midiParser.parseMidiFileToLinear(midiPath);
-        if (!res || !res.linear_analysis)
-          throw new Error('MIDI parsing failed');
-        const metadata = res.linear_analysis.metadata || {};
-        const fileHash = `midi-${Date.now()}`;
-        const analysisId = db.saveAnalysis({
-          file_path: midiPath,
-          file_hash: fileHash,
-          metadata,
-          linear_analysis: res.linear_analysis,
-          structural_map: { sections: [] },
-          arrangement_flow: {},
-          harmonic_context: {},
-          polyrhythmic_layers: [],
-        });
-        const database = db.getDb();
-        database &&
-          database.run &&
-          database.run('UPDATE Projects SET analysis_id = ? WHERE id = ?', [
-            analysisId,
-            projectId,
-          ]);
-        return { success: true, analysisId, fileHash };
-      }
-      const p = await libraryService.parseMidiAndSaveForProject(
-        projectId,
-        midiPath,
-      );
-      return p;
-    } catch (err) {
-      return { success: false, error: err.message || String(err) };
+registerIpcHandler('LIBRARY:PARSE_MIDI', async (event, { projectId, midiPath }) => {
+  try {
+    if (!projectId || !midiPath) throw new Error('Missing parameters');
+    if (!libraryService || !libraryService.parseMidiAndSaveForProject) {
+      // Fallback: use midiParser directly and save
+      const res = midiParser.parseMidiToLinearAnalysis
+        ? midiParser.parseMidiToLinearAnalysis(midiPath)
+        : await midiParser.parseMidiFileToLinear(midiPath);
+      if (!res || !res.linear_analysis) throw new Error('MIDI parsing failed');
+      const metadata = res.linear_analysis.metadata || {};
+      const fileHash = `midi-${Date.now()}`;
+      const analysisId = db.saveAnalysis({
+        file_path: midiPath,
+        file_hash: fileHash,
+        metadata,
+        linear_analysis: res.linear_analysis,
+        structural_map: { sections: [] },
+        arrangement_flow: {},
+        harmonic_context: {},
+        polyrhythmic_layers: [],
+      });
+      const database = db.getDb();
+      database &&
+        database.run &&
+        database.run('UPDATE Projects SET analysis_id = ? WHERE id = ?', [analysisId, projectId]);
+      return { success: true, analysisId, fileHash };
     }
-  });
+    const p = await libraryService.parseMidiAndSaveForProject(projectId, midiPath);
+    return p;
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+});
 app.on('window-all-closed', function () {
   if (process.platform !== 'darwin') {
     app.quit();
@@ -471,14 +807,8 @@ registerIpcHandler('OSC:SEND_TRANSPORT', async (event, command) => {
   const reaperMessage = oscBuilder.sendReaperTransport(command);
   const abletonMessage = oscBuilder.sendAbletonTransport(command);
 
-  oscClients.reaper.send(
-    reaperMessage.address,
-    ...reaperMessage.args.map((a) => a.value),
-  );
-  oscClients.ableton.send(
-    abletonMessage.address,
-    ...abletonMessage.args.map((a) => a.value),
-  );
+  oscClients.reaper.send(reaperMessage.address, ...reaperMessage.args.map((a) => a.value));
+  oscClients.ableton.send(abletonMessage.address, ...abletonMessage.args.map((a) => a.value));
 });
 
 ipcMain.on('NETWORK:SEND_MACRO', (event, { macro, payload }) => {
@@ -488,14 +818,8 @@ ipcMain.on('NETWORK:SEND_MACRO', (event, { macro, payload }) => {
     const reaperMessage = oscBuilder.sendReaperTransport(command);
     const abletonMessage = oscBuilder.sendAbletonTransport(command);
 
-    oscClients.reaper.send(
-      reaperMessage.address,
-      ...reaperMessage.args.map((a) => a.value),
-    );
-    oscClients.ableton.send(
-      abletonMessage.address,
-      ...abletonMessage.args.map((a) => a.value),
-    );
+    oscClients.reaper.send(reaperMessage.address, ...reaperMessage.args.map((a) => a.value));
+    oscClients.ableton.send(abletonMessage.address, ...abletonMessage.args.map((a) => a.value));
     broadcastStatus();
   } else {
     if (!payload || !payload.macroId) {
@@ -523,14 +847,11 @@ ipcMain.on('UI:REQUEST_INITIAL', (event) => {
   }
   lastInitialRequestTime = now;
 
-  // Send current blocks if any exist
+  // Send current blocks if any exist, ensuring they have complete data
   if (currentBlocks.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
-    console.log(
-      'UI:REQUEST_INITIAL: Sending',
-      currentBlocks.length,
-      'existing blocks',
-    );
-    mainWindow.webContents.send('UI:BLOCKS_UPDATE', currentBlocks);
+    const completeBlocks = currentBlocks.map(ensureBlockData);
+    console.log('UI:REQUEST_INITIAL: Sending', completeBlocks.length, 'existing blocks');
+    mainWindow.webContents.send('UI:BLOCKS_UPDATE', completeBlocks);
     // Only broadcast status if we actually sent blocks
     broadcastStatus();
   } else {
@@ -582,10 +903,8 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
   try {
     // Validate and run the same code path as ANALYSIS:START
     const fs = require('fs');
-    if (!filePath || typeof filePath !== 'string')
-      throw new Error('Invalid file path');
-    if (!fs.existsSync(filePath))
-      throw new Error('File does not exist: ' + filePath);
+    if (!filePath || typeof filePath !== 'string') throw new Error('Invalid file path');
+    if (!fs.existsSync(filePath)) throw new Error('File does not exist: ' + filePath);
 
     // NOTE: Required at top of file for early failure detection
 
@@ -594,34 +913,72 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
     if (engineConfig && engineConfig.loadConfig) {
       try {
         engineConfigData = engineConfig.loadConfig();
-        console.log('✅ Loaded calibrated engine config');
+        console.log('Loaded calibrated engine config');
       } catch (e) {
-        console.warn('⚠️ Failed to load engine config, using defaults:', e.message);
+        console.warn('Failed to load engine config, using defaults:', e.message);
       }
     }
-    
+
     // Load Analysis Lab parameters from DB settings (if available)
     // These override the calibrated config if set by user
     const dbSettings = db.getSettings();
     const analysisLabSettings = {
       // Harmony parameters - prefer DB settings, then calibrated, then defaults
-      transitionProb: parseFloat(dbSettings.analysis_transitionProb) || engineConfigData?.chordOptions?.transitionProb || 0.8,
-      diatonicBonus: parseFloat(dbSettings.analysis_diatonicBonus) || engineConfigData?.chordOptions?.diatonicBonus || 0.1,
-      rootPeakBias: parseFloat(dbSettings.analysis_rootPeakBias) || engineConfigData?.chordOptions?.rootPeakBias || 0.1,
-      temperature: parseFloat(dbSettings.analysis_temperature) || engineConfigData?.chordOptions?.temperature || 0.1,
+      transitionProb:
+        parseFloat(dbSettings.analysis_transitionProb) ||
+        engineConfigData?.chordOptions?.transitionProb ||
+        0.8,
+      diatonicBonus:
+        parseFloat(dbSettings.analysis_diatonicBonus) ||
+        engineConfigData?.chordOptions?.diatonicBonus ||
+        0.1,
+      rootPeakBias:
+        parseFloat(dbSettings.analysis_rootPeakBias) ||
+        engineConfigData?.chordOptions?.rootPeakBias ||
+        0.1,
+      temperature:
+        parseFloat(dbSettings.analysis_temperature) ||
+        engineConfigData?.chordOptions?.temperature ||
+        0.1,
       globalKey: dbSettings.analysis_globalKey || engineConfigData?.chordOptions?.globalKey || null,
       // Structure parameters (V1) - prefer DB settings, then calibrated, then defaults
-      noveltyKernel: parseInt(dbSettings.analysis_noveltyKernel) || engineConfigData?.architectOptions?.noveltyKernel || 5,
-      sensitivity: parseFloat(dbSettings.analysis_sensitivity) || engineConfigData?.architectOptions?.sensitivity || 0.6,
-      mergeChromaThreshold: parseFloat(dbSettings.analysis_mergeChromaThreshold) || engineConfigData?.architectOptions?.mergeChromaThreshold || 0.92,
-      minSectionDurationSec: parseFloat(dbSettings.analysis_minSectionDurationSec) || engineConfigData?.architectOptions?.minSectionDurationSec || 8.0,
-      forceOverSeg: dbSettings.analysis_forceOverSeg === 'true' ? true : (dbSettings.analysis_forceOverSeg === 'false' ? false : (engineConfigData?.architectOptions?.forceOverSeg || false)),
+      noveltyKernel:
+        parseInt(dbSettings.analysis_noveltyKernel) ||
+        engineConfigData?.architectOptions?.noveltyKernel ||
+        5,
+      sensitivity:
+        parseFloat(dbSettings.analysis_sensitivity) ||
+        engineConfigData?.architectOptions?.sensitivity ||
+        0.6,
+      mergeChromaThreshold:
+        parseFloat(dbSettings.analysis_mergeChromaThreshold) ||
+        engineConfigData?.architectOptions?.mergeChromaThreshold ||
+        0.92,
+      minSectionDurationSec:
+        parseFloat(dbSettings.analysis_minSectionDurationSec) ||
+        engineConfigData?.architectOptions?.minSectionDurationSec ||
+        8.0,
+      forceOverSeg:
+        dbSettings.analysis_forceOverSeg === 'true'
+          ? true
+          : dbSettings.analysis_forceOverSeg === 'false'
+            ? false
+            : engineConfigData?.architectOptions?.forceOverSeg || false,
       // Structure parameters (V2) - prefer DB settings, then calibrated, then defaults
-      detailLevel: parseFloat(dbSettings.analysis_detailLevel) || engineConfigData?.architectOptions?.detailLevel || 0.5,
-      adaptiveSensitivity: parseFloat(dbSettings.analysis_adaptiveSensitivity) || engineConfigData?.architectOptions?.adaptiveSensitivity || 1.5,
-      mfccWeight: parseFloat(dbSettings.analysis_mfccWeight) || engineConfigData?.architectOptions?.mfccWeight || 0.5,
+      detailLevel:
+        parseFloat(dbSettings.analysis_detailLevel) ||
+        engineConfigData?.architectOptions?.detailLevel ||
+        0.5,
+      adaptiveSensitivity:
+        parseFloat(dbSettings.analysis_adaptiveSensitivity) ||
+        engineConfigData?.architectOptions?.adaptiveSensitivity ||
+        1.5,
+      mfccWeight:
+        parseFloat(dbSettings.analysis_mfccWeight) ||
+        engineConfigData?.architectOptions?.mfccWeight ||
+        0.5,
     };
-    
+
     // Override with userHints if provided
     const harmonyOpts = {
       transitionProb: userHints.transitionProb ?? analysisLabSettings.transitionProb,
@@ -655,8 +1012,7 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
       metadata,
       harmonyOpts, // Pass harmony options to listener
     );
-    if (!result || !result.linear_analysis)
-      throw new Error('Pass 1 returned invalid result');
+    if (!result || !result.linear_analysis) throw new Error('Pass 1 returned invalid result');
 
     const linear_analysis = result.linear_analysis;
     session.setResult('pass1', linear_analysis);
@@ -667,15 +1023,17 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
     session.setState('pass2');
     tracker.update('pass2', 0);
     tracker.broadcast();
-    
+
     // Use Analysis Lab parameters for architect (with fallback defaults)
     const architectOptions = {
       downsampleFactor: userHints.downsampleFactor ?? 4,
       forceOverSeg: userHints.forceOverSeg ?? analysisLabSettings.forceOverSeg ?? false,
       noveltyKernel: userHints.noveltyKernel ?? analysisLabSettings.noveltyKernel ?? 5,
       sensitivity: userHints.sensitivity ?? analysisLabSettings.sensitivity ?? 0.6,
-      mergeChromaThreshold: userHints.mergeChromaThreshold ?? analysisLabSettings.mergeChromaThreshold ?? 0.92,
-      minSectionDurationSec: userHints.minSectionDurationSec ?? analysisLabSettings.minSectionDurationSec ?? 8.0,
+      mergeChromaThreshold:
+        userHints.mergeChromaThreshold ?? analysisLabSettings.mergeChromaThreshold ?? 0.92,
+      minSectionDurationSec:
+        userHints.minSectionDurationSec ?? analysisLabSettings.minSectionDurationSec ?? 8.0,
       // V1 fallback options
       exactChromaThreshold: 0.99,
       exactMfccThreshold: 0.95,
@@ -683,28 +1041,33 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
       progressionSimilarityMode: 'normalized',
       minSectionsStop: 20,
     };
-    console.log('🏗️ Applying Architect Config from Analysis Lab:', architectOptions);
-    
+    console.log('Applying Architect Config from Analysis Lab:', architectOptions);
+
     // Map to V2 adaptive parameters
     const computeScaleWeights = (detailLevel) => {
       const phraseW = Math.max(0.2, Math.min(0.8, detailLevel));
       const movementW = 1 - phraseW - 0.2;
       return { phrase: phraseW, section: 0.2, movement: Math.max(0.05, movementW) };
     };
-    
+
     const v2Options = {
       downsampleFactor: architectOptions.downsampleFactor,
-      adaptiveSensitivity: userHints.adaptiveSensitivity ?? analysisLabSettings.adaptiveSensitivity ?? 1.5,
+      adaptiveSensitivity:
+        userHints.adaptiveSensitivity ?? analysisLabSettings.adaptiveSensitivity ?? 1.5,
       scaleWeights: userHints.scaleWeights ?? computeScaleWeights(analysisLabSettings.detailLevel),
       mfccWeight: userHints.mfccWeight ?? analysisLabSettings.mfccWeight ?? 0.5,
       forceOverSeg: architectOptions.forceOverSeg,
     };
-    
+
     // V2 enabled by default when available; set USE_ARCHITECT_V2=0 to force legacy
     const useV2 = !!architectV2 && process.env.USE_ARCHITECT_V2 !== '0';
     const architectVersion = useV2 ? 'V2 (Multi-Scale + Adaptive)' : 'V1 (Canonical)';
-    console.log(`🏗️ Using Architect ${architectVersion}${process.env.USE_ARCHITECT_V2 === '0' ? ' (forced via USE_ARCHITECT_V2=0)' : ''}`);
-    const structural_map = await (useV2 ? architectV2.analyzeStructure : architect.analyzeStructure)(
+    console.log(
+      `Using Architect ${architectVersion}${process.env.USE_ARCHITECT_V2 === '0' ? ' (forced via USE_ARCHITECT_V2=0)' : ''}`,
+    );
+    const structural_map = await (
+      useV2 ? architectV2.analyzeStructure : architect.analyzeStructure
+    )(
       linear_analysis,
       (p) => {
         tracker.update('pass2', p.progress || p);
@@ -756,12 +1119,8 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
     };
     const harmonic_context = {
       global_key: {
-        primary_key:
-          linear_analysis.metadata?.detected_key || metadata.key_hint || 'C',
-        mode:
-          linear_analysis.metadata?.detected_mode ||
-          metadata.mode_hint ||
-          'ionian',
+        primary_key: linear_analysis.metadata?.detected_key || metadata.key_hint || 'C',
+        mode: linear_analysis.metadata?.detected_mode || metadata.mode_hint || 'ionian',
         confidence: 0.8,
       },
       modulations: [],
@@ -769,9 +1128,7 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
       genre_profile: {
         detected_genre: metadata.genre_hint || 'pop',
         confidence: 0.7,
-        genre_constraints: genreProfiles.getGenreProfile(
-          metadata.genre_hint || 'pop',
-        ),
+        genre_constraints: genreProfiles.getGenreProfile(metadata.genre_hint || 'pop'),
       },
       functional_summary: {},
     };
@@ -782,7 +1139,7 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
       file_hash: fileHash,
       metadata,
       linear_analysis,
-      structural_map: corrected_structural_map, // ✅ Using Pass 3 corrected output
+      structural_map: corrected_structural_map, // Using Pass 3 corrected output
       arrangement_flow,
       harmonic_context,
       polyrhythmic_layers: [],
@@ -791,10 +1148,7 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
       const database = db.getDb();
       database &&
         database.run &&
-        database.run('UPDATE Projects SET analysis_id = ? WHERE id = ?', [
-          analysisId,
-          projectId,
-        ]);
+        database.run('UPDATE Projects SET analysis_id = ? WHERE id = ?', [analysisId, projectId]);
     }
 
     tracker.complete();
@@ -811,12 +1165,9 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
 
 // Analysis IPC Handlers
 
-registerIpcHandler(
-  'ANALYSIS:START',
-  async (event, { filePath, userHints = {} }) => {
-    return await startFullAnalysis(filePath, userHints, null);
-  },
-);
+registerIpcHandler('ANALYSIS:START', async (event, { filePath, userHints = {} }) => {
+  return await startFullAnalysis(filePath, userHints, null);
+});
 
 registerIpcHandler('ANALYSIS:GET_STATUS', async (event, fileHash) => {
   const session = sessionManager.getSession(fileHash);
@@ -828,7 +1179,7 @@ registerIpcHandler('ANALYSIS:GET_STATUS', async (event, fileHash) => {
 
 registerIpcHandler('ANALYSIS:GET_RESULT', async (event, fileHash) => {
   console.log('IPC: ANALYSIS:GET_RESULT called for fileHash:', fileHash);
-  
+
   // Check preview cache first (for uncommitted changes)
   if (previewAnalysisCache.has(fileHash)) {
     const cached = previewAnalysisCache.get(fileHash);
@@ -842,7 +1193,7 @@ registerIpcHandler('ANALYSIS:GET_RESULT', async (event, fileHash) => {
     });
     return cached;
   }
-  
+
   // Otherwise, read from database
   const analysis = db.getAnalysis(fileHash);
 
@@ -862,11 +1213,34 @@ registerIpcHandler('ANALYSIS:GET_RESULT', async (event, fileHash) => {
   return analysis;
 });
 
+registerIpcHandler('LYRICS:GET', async (event, { artist, title }) => {
+  try {
+    const { fetchLyrics, parseLRC } = require('./services/lyrics');
+    const lyricsData = await fetchLyrics(artist, title);
+    if (!lyricsData) {
+      return { success: false, error: 'Lyrics not found' };
+    }
+    const parsed = parseLRC(lyricsData.synced);
+    return { success: true, lyrics: { ...lyricsData, parsed } };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+registerIpcHandler('LIBRARY:READ_LYRICS', async (event, { path: lyricsPath }) => {
+  try {
+    if (!lyricsPath || !fs.existsSync(lyricsPath)) {
+      return { success: false, error: 'Lyrics file not found' };
+    }
+    const content = fs.readFileSync(lyricsPath, 'utf8');
+    return { success: true, content };
+  } catch (error) {
+    return { success: false, error: error.message || String(error) };
+  }
+});
+
 registerIpcHandler('ANALYSIS:PARSE_MIDI', async (event, payload) => {
   try {
-    console.warn(
-      'DEPRECATED: ANALYSIS:PARSE_MIDI called. Use LIBRARY:PARSE_MIDI.',
-    );
     // Legacy call used to accept a midiPath string. Now we require an object with projectId and midiPath.
     if (!payload) throw new Error('No payload provided');
     // If payload is a string (old usage), reject to prevent orphaned analyses.
@@ -916,10 +1290,7 @@ registerIpcHandler('ANALYSIS:PARSE_MIDI', async (event, payload) => {
     const database = db.getDb();
     database &&
       database.run &&
-      database.run('UPDATE Projects SET analysis_id = ? WHERE id = ?', [
-        analysisId,
-        projectId,
-      ]);
+      database.run('UPDATE Projects SET analysis_id = ? WHERE id = ?', [analysisId, projectId]);
     return { success: true, analysisId, fileHash };
   } catch (err) {
     return { success: false, error: err.message || String(err) };
@@ -927,106 +1298,132 @@ registerIpcHandler('ANALYSIS:PARSE_MIDI', async (event, payload) => {
 });
 
 // Fast re-calculation of chord events for an existing analysis (no Python)
-registerIpcHandler(
-  'ANALYSIS:RECALC_CHORDS',
-  async (event, { fileHash, options = {} }) => {
-    try {
-      if (!fileHash) throw new Error('fileHash required');
-      const analysis = db.getAnalysis(fileHash);
-      if (!analysis || !analysis.linear_analysis)
-        throw new Error('Analysis not found');
-      // Try to invoke listener's recalcChords if available
-      if (listener && listener.recalcChords) {
-        // Add detection options + globalKey to metadata so chord analyzer can pick it up
-        const cloned = JSON.parse(JSON.stringify(analysis.linear_analysis));
-        // Pass structuralMap if available for section-based key bias
-        const structuralMap = analysis.structural_map || null;
-        if (!cloned.metadata) cloned.metadata = {};
-        const opt = options || {};
-        const mergedOptions = {
-          globalKey:
-            opt.globalKey ||
-            analysis.harmonic_context?.global_key?.primary_key ||
-            cloned.metadata.detected_key,
-          temperature: opt.temperature ?? 0.1,
-          transitionProb: opt.transitionProb ?? 0.8,
-          diatonicBonus: opt.diatonicBonus ?? 0.1,
-          rootPeakBias: opt.rootPeakBias ?? 0.1,
-          windowShift: opt.windowShift ?? 0, // Window shift in seconds (-0.05 to +0.05)
-          bassWeight: opt.bassWeight ?? 0, // Bass weight for inversion detection (0-1)
-          frameHop:
-            cloned.metadata?.frame_hop_seconds ||
-            cloned.metadata?.hop_length / cloned.metadata?.sample_rate ||
-            0.0232,
-          rootOnly: opt.rootOnly === undefined ? true : !!opt.rootOnly,
-          structuralMap: structuralMap, // Pass structural map for section-based key bias
-        };
-        if (mergedOptions.globalKey) {
-          cloned.metadata.detected_key = mergedOptions.globalKey;
-          cloned.metadata.detected_mode = cloned.metadata.detected_mode || 'major';
-          cloned.metadata.user_override_key = mergedOptions.globalKey;
-        }
-        const res = listener.recalcChords(cloned, mergedOptions);
-        if (!res || !res.success)
-          throw new Error(res?.error || 'recalc failed');
-        
-        // Apply changes to analysis object (in-memory) for preview OR commit
-        const updatedAnalysis = JSON.parse(JSON.stringify(analysis)); // Deep clone
-        updatedAnalysis.linear_analysis.events = res.events;
-        // Update the harmonic_context if globalKey overridden
-        if (mergedOptions.globalKey) {
-          updatedAnalysis.harmonic_context = updatedAnalysis.harmonic_context || {};
-          updatedAnalysis.harmonic_context.global_key =
-            updatedAnalysis.harmonic_context.global_key || {};
-          updatedAnalysis.harmonic_context.global_key.primary_key = mergedOptions.globalKey;
-          updatedAnalysis.harmonic_context.global_key.confidence =
-            updatedAnalysis.harmonic_context.global_key.confidence || 0.95;
-        }
-        // Persist chosen analyzer tuning into harmonic_context for transparency
-        updatedAnalysis.harmonic_context = updatedAnalysis.harmonic_context || {};
-        updatedAnalysis.harmonic_context.chord_analyzer_options =
-          updatedAnalysis.harmonic_context.chord_analyzer_options || {};
-        updatedAnalysis.harmonic_context.chord_analyzer_options = {
-          ...(updatedAnalysis.harmonic_context.chord_analyzer_options || {}),
-          ...(mergedOptions || {}),
-        };
-        
-        if (options.commit) {
-          // Persist changes to DB by updating the analysis row
-          const success = db.updateAnalysisById(updatedAnalysis.id, updatedAnalysis);
-          if (!success) throw new Error('Failed to commit analysis update');
-          // Clear preview cache since changes are now in DB
-          previewAnalysisCache.delete(fileHash);
-          console.log('✅ Chord recalculation committed to database');
-        } else {
-          // Preview mode: store in cache so ANALYSIS:GET_RESULT can return it
-          previewAnalysisCache.set(fileHash, updatedAnalysis);
-          console.log('👁️ Chord recalculation applied in preview mode (cached, not committed)');
-        }
-        
-        // Trigger UI update by reloading analysis
-        // For preview mode, we need to reload the analysis so Sandbox view sees updated chords
-        // Even though we don't commit to DB, the in-memory analysis object is updated
-        try {
-          // Reload analysis to Architect (this will use the updated in-memory analysis)
-          // The analysis object in memory now has the updated events
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            // Send a signal to reload the analysis
-            mainWindow.webContents.send('ANALYSIS:RELOAD_REQUESTED', { fileHash });
-            console.log('✅ Requested analysis reload for preview');
+registerIpcHandler('ANALYSIS:RECALC_CHORDS', async (event, { fileHash, options = {} }) => {
+  try {
+    if (!fileHash) throw new Error('fileHash required');
+    const analysis = db.getAnalysis(fileHash);
+    if (!analysis || !analysis.linear_analysis) throw new Error('Analysis not found');
+    // Try to invoke listener's recalcChords if available
+    if (listener && listener.recalcChords) {
+      // Add detection options + globalKey to metadata so chord analyzer can pick it up
+      const cloned = JSON.parse(JSON.stringify(analysis.linear_analysis));
+      // Pass structuralMap if available for section-based key bias
+      const structuralMap = analysis.structural_map || null;
+      if (!cloned.metadata) cloned.metadata = {};
+      const opt = options || {};
+      
+      // Load calibrated parameters from engineConfig as defaults
+      let calibratedChordOptions = {};
+      try {
+        if (engineConfig) {
+          // Try to get loadConfig function from engineConfig module
+          let loadConfigFn = null;
+          if (typeof engineConfig.loadConfig === 'function') {
+            loadConfigFn = engineConfig.loadConfig;
+          } else if (engineConfig.default && typeof engineConfig.default.loadConfig === 'function') {
+            loadConfigFn = engineConfig.default.loadConfig;
+          } else if (typeof engineConfig.default === 'function') {
+            // If default is the loadConfig function itself
+            loadConfigFn = engineConfig.default;
           }
-        } catch (loadErr) {
-          console.warn('⚠️ Failed to request reload:', loadErr.message);
+          
+          if (loadConfigFn) {
+            const config = loadConfigFn();
+            calibratedChordOptions = config.chordOptions || {};
+            console.log('[RECALC_CHORDS] Using calibrated parameters:', calibratedChordOptions);
+          } else {
+            console.log('[RECALC_CHORDS] engineConfig available but loadConfig not found, using UI defaults');
+          }
         }
-        
-        return { success: true, events: res.events };
+      } catch (err) {
+        console.warn('[RECALC_CHORDS] Failed to load engineConfig:', err.message);
       }
-      // Fallback: no listener helper exposed
-      throw new Error('Listener recalc not available');
-    } catch (err) {
-      return { success: false, error: err.message || String(err) };
+      
+      // Merge: UI options override calibrated defaults
+      const mergedOptions = {
+        globalKey:
+          opt.globalKey ||
+          calibratedChordOptions.globalKey ||
+          analysis.harmonic_context?.global_key?.primary_key ||
+          cloned.metadata.detected_key,
+        temperature: opt.temperature ?? calibratedChordOptions.temperature ?? 0.1,
+        transitionProb: opt.transitionProb ?? calibratedChordOptions.transitionProb ?? 0.8,
+        diatonicBonus: opt.diatonicBonus ?? calibratedChordOptions.diatonicBonus ?? 0.1,
+        rootPeakBias: opt.rootPeakBias ?? calibratedChordOptions.rootPeakBias ?? 0.1,
+        windowShift: opt.windowShift ?? 0, // Window shift in seconds (-0.05 to +0.05)
+        bassWeight: opt.bassWeight ?? 0, // Bass weight for inversion detection (0-1)
+        frameHop:
+          cloned.metadata?.frame_hop_seconds ||
+          cloned.metadata?.hop_length / cloned.metadata?.sample_rate ||
+          0.0232,
+        rootOnly: opt.rootOnly === undefined ? true : !!opt.rootOnly,
+        structuralMap: structuralMap, // Pass structural map for section-based key bias
+      };
+      if (mergedOptions.globalKey) {
+        cloned.metadata.detected_key = mergedOptions.globalKey;
+        cloned.metadata.detected_mode = cloned.metadata.detected_mode || 'major';
+        cloned.metadata.user_override_key = mergedOptions.globalKey;
+      }
+      const res = listener.recalcChords(cloned, mergedOptions);
+      if (!res || !res.success) throw new Error(res?.error || 'recalc failed');
+
+      // Apply changes to analysis object (in-memory) for preview OR commit
+      const updatedAnalysis = JSON.parse(JSON.stringify(analysis)); // Deep clone
+      updatedAnalysis.linear_analysis.events = res.events;
+      // Update the harmonic_context if globalKey overridden
+      if (mergedOptions.globalKey) {
+        updatedAnalysis.harmonic_context = updatedAnalysis.harmonic_context || {};
+        updatedAnalysis.harmonic_context.global_key =
+          updatedAnalysis.harmonic_context.global_key || {};
+        updatedAnalysis.harmonic_context.global_key.primary_key = mergedOptions.globalKey;
+        updatedAnalysis.harmonic_context.global_key.confidence =
+          updatedAnalysis.harmonic_context.global_key.confidence || 0.95;
+      }
+      // Persist chosen analyzer tuning into harmonic_context for transparency
+      updatedAnalysis.harmonic_context = updatedAnalysis.harmonic_context || {};
+      updatedAnalysis.harmonic_context.chord_analyzer_options =
+        updatedAnalysis.harmonic_context.chord_analyzer_options || {};
+      updatedAnalysis.harmonic_context.chord_analyzer_options = {
+        ...(updatedAnalysis.harmonic_context.chord_analyzer_options || {}),
+        ...(mergedOptions || {}),
+      };
+
+      if (options.commit) {
+        // Persist changes to DB by updating the analysis row
+        const success = db.updateAnalysisById(updatedAnalysis.id, updatedAnalysis);
+        if (!success) throw new Error('Failed to commit analysis update');
+        // Clear preview cache since changes are now in DB
+        previewAnalysisCache.delete(fileHash);
+        console.log('Chord recalculation committed to database');
+      } else {
+        // Preview mode: store in cache so ANALYSIS:GET_RESULT can return it
+        previewAnalysisCache.set(fileHash, updatedAnalysis);
+        console.log('Chord recalculation applied in preview mode (cached, not committed)');
+      }
+
+      // Trigger UI update by reloading analysis
+      // For preview mode, we need to reload the analysis so Sandbox view sees updated chords
+      // Even though we don't commit to DB, the in-memory analysis object is updated
+      try {
+        // Reload analysis to Architect (this will use the updated in-memory analysis)
+        // The analysis object in memory now has the updated events
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          // Send a signal to reload the analysis
+          mainWindow.webContents.send('ANALYSIS:RELOAD_REQUESTED', { fileHash });
+          console.log('Requested analysis reload for preview');
+        }
+      } catch (loadErr) {
+        console.warn('Failed to request reload:', loadErr.message);
+      }
+
+      return { success: true, events: res.events };
     }
-  });
+    // Fallback: no listener helper exposed
+    throw new Error('Listener recalc not available');
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+});
 
 // Grid transformation (fast, in-memory/preview by default)
 registerIpcHandler(
@@ -1035,8 +1432,7 @@ registerIpcHandler(
     try {
       if (!fileHash) throw new Error('fileHash required');
       const analysis = db.getAnalysis(fileHash);
-      if (!analysis || !analysis.linear_analysis)
-        throw new Error('Analysis not found');
+      if (!analysis || !analysis.linear_analysis) throw new Error('Analysis not found');
       const cloned = JSON.parse(JSON.stringify(analysis.linear_analysis));
       cloned.beat_grid = cloned.beat_grid || { beat_timestamps: [] };
       const grid = cloned.beat_grid;
@@ -1098,152 +1494,182 @@ registerIpcHandler('ANALYSIS:GET_BY_ID', async (event, analysisId) => {
 });
 
 // Apply section sculpting parameters in real-time
-registerIpcHandler('ANALYSIS:SCULPT_SECTION', async (event, { fileHash, sectionId, parameters = {}, commit = false }) => {
-  try {
-    if (!fileHash || !sectionId) throw new Error('fileHash and sectionId required');
-    
-    // Get analysis (from cache if preview, otherwise from DB)
-    let analysis = previewAnalysisCache.get(fileHash) || db.getAnalysis(fileHash);
-    if (!analysis || !analysis.structural_map || !analysis.structural_map.sections) {
-      throw new Error('Analysis not found or invalid');
-    }
-
-    // Find the section
-    const sections = analysis.structural_map.sections;
-    const sectionIndex = sections.findIndex(s => 
-      (s.id === sectionId) || (s.section_id === sectionId)
-    );
-    
-    if (sectionIndex === -1) {
-      throw new Error(`Section ${sectionId} not found`);
-    }
-
-    const section = sections[sectionIndex];
-    
-    // Clone analysis for modification
-    const updatedAnalysis = JSON.parse(JSON.stringify(analysis));
-    const updatedSection = updatedAnalysis.structural_map.sections[sectionIndex];
-    
-    // Initialize DNA objects if needed
-    updatedSection.harmonic_dna = updatedSection.harmonic_dna || {};
-    updatedSection.rhythmic_dna = updatedSection.rhythmic_dna || {};
-    
-    // Apply parameters to section DNA
-    if (parameters.harmonic_complexity !== undefined) {
-      updatedSection.harmonic_dna.complexity = parameters.harmonic_complexity;
-      updatedSection.harmonic_dna.complexity_level = 
-        parameters.harmonic_complexity <= 30 ? 'basic' :
-        parameters.harmonic_complexity <= 60 ? 'extended' :
-        parameters.harmonic_complexity <= 85 ? 'complex' : 'neo-soul';
-    }
-    
-    if (parameters.rhythmic_density !== undefined) {
-      updatedSection.rhythmic_dna.density = parameters.rhythmic_density;
-      updatedSection.rhythmic_dna.density_level =
-        parameters.rhythmic_density <= 25 ? 'sparse' :
-        parameters.rhythmic_density <= 50 ? 'moderate' :
-        parameters.rhythmic_density <= 75 ? 'dense' : 'very_dense';
-    }
-    
-    if (parameters.groove_swing !== undefined) {
-      updatedSection.rhythmic_dna.groove_swing = parameters.groove_swing;
-      updatedSection.rhythmic_dna.swing_ratio =
-        parameters.groove_swing === 0 ? 1.0 :
-        parameters.groove_swing <= 33 ? 1.2 :
-        parameters.groove_swing <= 66 ? 1.5 :
-        parameters.groove_swing <= 85 ? 1.7 : 2.0;
-    }
-    
-    if (parameters.tension !== undefined) {
-      updatedSection.harmonic_dna.tension = parameters.tension;
-      updatedSection.harmonic_dna.tension_level =
-        parameters.tension <= 30 ? 'diatonic' :
-        parameters.tension <= 60 ? 'chromatic' :
-        parameters.tension <= 85 ? 'tritone_sub' : 'altered';
-    }
-    
-    // Store sculpting parameters in section metadata
-    updatedSection.sculpting_parameters = {
-      ...(updatedSection.sculpting_parameters || {}),
-      ...parameters,
-      last_updated: new Date().toISOString(),
-    };
-    
-    if (commit) {
-      // Persist to database
-      const success = db.updateAnalysisById(updatedAnalysis.id, updatedAnalysis);
-      if (!success) throw new Error('Failed to commit section update');
-      previewAnalysisCache.delete(fileHash); // Clear cache
-      console.log('✅ Section sculpting committed to database');
-    } else {
-      // Preview mode: store in cache
-      previewAnalysisCache.set(fileHash, updatedAnalysis);
-      console.log('👁️ Section sculpting applied in preview mode (cached)');
-    }
-    
-    // Trigger UI reload
+registerIpcHandler(
+  'ANALYSIS:SCULPT_SECTION',
+  async (event, { fileHash, sectionId, parameters = {}, commit = false }) => {
     try {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('ANALYSIS:RELOAD_REQUESTED', { fileHash });
+      if (!fileHash || !sectionId) throw new Error('fileHash and sectionId required');
+
+      // Get analysis (from cache if preview, otherwise from DB)
+      let analysis = previewAnalysisCache.get(fileHash) || db.getAnalysis(fileHash);
+      if (!analysis || !analysis.structural_map || !analysis.structural_map.sections) {
+        throw new Error('Analysis not found or invalid');
       }
-    } catch (loadErr) {
-      console.warn('⚠️ Failed to request reload:', loadErr.message);
+
+      // Find the section
+      const sections = analysis.structural_map.sections;
+      const sectionIndex = sections.findIndex(
+        (s) => s.id === sectionId || s.section_id === sectionId,
+      );
+
+      if (sectionIndex === -1) {
+        throw new Error(`Section ${sectionId} not found`);
+      }
+
+      const section = sections[sectionIndex];
+
+      // Clone analysis for modification
+      const updatedAnalysis = JSON.parse(JSON.stringify(analysis));
+      const updatedSection = updatedAnalysis.structural_map.sections[sectionIndex];
+
+      // Initialize DNA objects if needed
+      updatedSection.harmonic_dna = updatedSection.harmonic_dna || {};
+      updatedSection.rhythmic_dna = updatedSection.rhythmic_dna || {};
+
+      // Apply parameters to section DNA
+      if (parameters.harmonic_complexity !== undefined) {
+        updatedSection.harmonic_dna.complexity = parameters.harmonic_complexity;
+        updatedSection.harmonic_dna.complexity_level =
+          parameters.harmonic_complexity <= 30
+            ? 'basic'
+            : parameters.harmonic_complexity <= 60
+              ? 'extended'
+              : parameters.harmonic_complexity <= 85
+                ? 'complex'
+                : 'neo-soul';
+      }
+
+      if (parameters.rhythmic_density !== undefined) {
+        updatedSection.rhythmic_dna.density = parameters.rhythmic_density;
+        updatedSection.rhythmic_dna.density_level =
+          parameters.rhythmic_density <= 25
+            ? 'sparse'
+            : parameters.rhythmic_density <= 50
+              ? 'moderate'
+              : parameters.rhythmic_density <= 75
+                ? 'dense'
+                : 'very_dense';
+      }
+
+      if (parameters.groove_swing !== undefined) {
+        updatedSection.rhythmic_dna.groove_swing = parameters.groove_swing;
+        updatedSection.rhythmic_dna.swing_ratio =
+          parameters.groove_swing === 0
+            ? 1.0
+            : parameters.groove_swing <= 33
+              ? 1.2
+              : parameters.groove_swing <= 66
+                ? 1.5
+                : parameters.groove_swing <= 85
+                  ? 1.7
+                  : 2.0;
+      }
+
+      if (parameters.tension !== undefined) {
+        updatedSection.harmonic_dna.tension = parameters.tension;
+        updatedSection.harmonic_dna.tension_level =
+          parameters.tension <= 30
+            ? 'diatonic'
+            : parameters.tension <= 60
+              ? 'chromatic'
+              : parameters.tension <= 85
+                ? 'tritone_sub'
+                : 'altered';
+      }
+
+      // Store sculpting parameters in section metadata
+      updatedSection.sculpting_parameters = {
+        ...(updatedSection.sculpting_parameters || {}),
+        ...parameters,
+        last_updated: new Date().toISOString(),
+      };
+
+      if (commit) {
+        // Persist to database
+        const success = db.updateAnalysisById(updatedAnalysis.id, updatedAnalysis);
+        if (!success) throw new Error('Failed to commit section update');
+        previewAnalysisCache.delete(fileHash); // Clear cache
+        console.log('Section sculpting committed to database');
+      } else {
+        // Preview mode: store in cache
+        previewAnalysisCache.set(fileHash, updatedAnalysis);
+        console.log('Section sculpting applied in preview mode (cached)');
+      }
+
+      // Trigger UI reload
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('ANALYSIS:RELOAD_REQUESTED', { fileHash });
+        }
+      } catch (loadErr) {
+        console.warn('Failed to request reload:', loadErr.message);
+      }
+
+      return {
+        success: true,
+        section: updatedSection,
+        commit: commit || false,
+      };
+    } catch (err) {
+      console.error('[ANALYSIS:SCULPT_SECTION] Error:', err);
+      return { success: false, error: err.message || String(err) };
     }
-    
-    return { 
-      success: true, 
-      section: updatedSection,
-      commit: commit || false,
-    };
-  } catch (err) {
-    console.error('[ANALYSIS:SCULPT_SECTION] Error:', err);
-    return { success: false, error: err.message || String(err) };
-  }
-});
+  },
+);
 
 // Re-segment the structure (fast-ish) by re-running architect + theorist on existing linear_analysis
-registerIpcHandler('ANALYSIS:RESEGMENT', async (event, { fileHash, options = {}, commit = false }) => {
-  try {
-    if (!fileHash) throw new Error('fileHash required');
-    const analysis = db.getAnalysis(fileHash);
-    if (!analysis || !analysis.linear_analysis) throw new Error('Analysis not found');
-    // merge defaults with provided options
-    const useV2 = options.version === 'v2' && architectV2;
-    const architectOptions = useV2
-      ? {
-          downsampleFactor: options.downsampleFactor || 4,
-          adaptiveSensitivity: options.adaptiveSensitivity || 1.5,
-          scaleWeights: options.scaleWeights || null,
-          mfccWeight: options.mfccWeight,
-          forceOverSeg: options.forceOverSeg === undefined ? false : !!options.forceOverSeg,
-          clusterSimilarity: options.clusterSimilarity || 0.6,
-        }
-      : {
-          downsampleFactor: options.downsampleFactor || 4,
-          forceOverSeg: options.forceOverSeg === undefined ? false : !!options.forceOverSeg,
-          noveltyKernel: options.noveltyKernel || 5,
-          sensitivity: options.sensitivity || 0.6,
-          mergeChromaThreshold: options.mergeChromaThreshold || 0.92,
-          minSectionDurationSec: options.minSectionDurationSec || 8.0,
-        };
-    const structural_map = await (useV2 ? architectV2.analyzeStructure : architect.analyzeStructure)(analysis.linear_analysis, (p) => {}, architectOptions);
-    if (!structural_map) throw new Error('architect failed');
-    const corrected = await theorist.correctStructuralMap(structural_map, analysis.linear_analysis, analysis.metadata || {}, (p) => {});
-    if (commit) {
-      analysis.structural_map = corrected;
-      const success = db.updateAnalysisById(analysis.id, analysis);
-      if (!success) throw new Error('Failed to commit resegment');
+registerIpcHandler(
+  'ANALYSIS:RESEGMENT',
+  async (event, { fileHash, options = {}, commit = false }) => {
+    try {
+      if (!fileHash) throw new Error('fileHash required');
+      const analysis = db.getAnalysis(fileHash);
+      if (!analysis || !analysis.linear_analysis) throw new Error('Analysis not found');
+      // merge defaults with provided options
+      const useV2 = options.version === 'v2' && architectV2;
+      const architectOptions = useV2
+        ? {
+            downsampleFactor: options.downsampleFactor || 4,
+            adaptiveSensitivity: options.adaptiveSensitivity || 1.5,
+            scaleWeights: options.scaleWeights || null,
+            mfccWeight: options.mfccWeight,
+            forceOverSeg: options.forceOverSeg === undefined ? false : !!options.forceOverSeg,
+            clusterSimilarity: options.clusterSimilarity || 0.6,
+          }
+        : {
+            downsampleFactor: options.downsampleFactor || 4,
+            forceOverSeg: options.forceOverSeg === undefined ? false : !!options.forceOverSeg,
+            noveltyKernel: options.noveltyKernel || 5,
+            sensitivity: options.sensitivity || 0.6,
+            mergeChromaThreshold: options.mergeChromaThreshold || 0.92,
+            minSectionDurationSec: options.minSectionDurationSec || 8.0,
+          };
+      const structural_map = await (
+        useV2 ? architectV2.analyzeStructure : architect.analyzeStructure
+      )(analysis.linear_analysis, (p) => {}, architectOptions);
+      if (!structural_map) throw new Error('architect failed');
+      const corrected = await theorist.correctStructuralMap(
+        structural_map,
+        analysis.linear_analysis,
+        analysis.metadata || {},
+        (p) => {},
+      );
+      if (commit) {
+        analysis.structural_map = corrected;
+        const success = db.updateAnalysisById(analysis.id, analysis);
+        if (!success) throw new Error('Failed to commit resegment');
+      }
+      return { success: true, structural_map: corrected, debug: structural_map.debug || null };
+    } catch (err) {
+      return { success: false, error: err.message || String(err) };
     }
-    return { success: true, structural_map: corrected, debug: structural_map.debug || null };
-  } catch (err) {
-    return { success: false, error: err.message || String(err) };
-  }
-});
+  },
+);
 
 // Generate structure from constraints (Sandbox Mode)
 registerIpcHandler('SANDBOX:GENERATE', async (event, constraints) => {
   try {
-    console.log('SANDBOX: Generating structure with constraints:', constraints);
+    console.log('[SANDBOX] Generating structure with constraints:', constraints);
     const structuralMap = structureGenerator.generateStructure(constraints);
 
     // Convert to blocks format
@@ -1253,7 +1679,7 @@ registerIpcHandler('SANDBOX:GENERATE', async (event, constraints) => {
         : 16;
       const bars = Math.max(1, Math.round(duration / 2));
 
-      return {
+      return ensureBlockData({
         id: section.section_id || `generated-${index}`,
         name: section.section_label || 'Section',
         label: section.section_label || 'Section',
@@ -1265,10 +1691,10 @@ registerIpcHandler('SANDBOX:GENERATE', async (event, constraints) => {
         rhythmic_dna: section.rhythmic_dna || {},
         time_range: section.time_range,
         probability_score: section.probability_score || 0.8,
-      };
+      });
     });
 
-    console.log('SANDBOX: Generated', blocks.length, 'sections');
+    console.log('[SANDBOX] ✅ Generated', blocks.length, 'sections');
 
     // Store blocks for persistence
     currentBlocks = blocks;
@@ -1285,53 +1711,207 @@ registerIpcHandler('SANDBOX:GENERATE', async (event, constraints) => {
   }
 });
 
-registerIpcHandler(
-  'LIBRARY:PROMOTE_TO_BENCHMARK',
-  async (event, { projectId }) => {
-    try {
-      if (!libraryService || !libraryService.promoteToBenchmark) {
-        throw new Error('Library service not available');
-      }
-      const result = await libraryService.promoteToBenchmark(projectId);
-      return result;
-    } catch (err) {
-      return { success: false, error: err.message || String(err) };
+registerIpcHandler('LIBRARY:PROMOTE_TO_BENCHMARK', async (event, { projectId }) => {
+  try {
+    if (!libraryService || !libraryService.promoteToBenchmark) {
+      throw new Error('Library service not available');
     }
-  },
-);
+    const result = await libraryService.promoteToBenchmark(projectId);
+    return result;
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+});
 
-registerIpcHandler(
-  'LIBRARY:RE_ANALYZE',
-  async (event, { projectId, force = false }) => {
-    try {
-      if (!projectId) throw new Error('Missing projectId');
-      const project = db.getProjectById(projectId);
-      if (!project) throw new Error('Project not found');
-      if (!project.audio_path)
-        throw new Error('Project has no audio path to re-analyze');
-      // If there's an existing analysis, delete it unless force=false
-      if (project.analysis_id) {
-        // delete
-        db.deleteAnalysisById(project.analysis_id);
-        db.updateProjectAnalysisId(projectId, null);
-      }
-
-      // Start a fresh full analysis and attach it to the project
-      const res = await startFullAnalysis(project.audio_path, {}, projectId);
-      return res;
-    } catch (err) {
-      return { success: false, error: err.message || String(err) };
+registerIpcHandler('LIBRARY:RE_ANALYZE', async (event, { projectId, force = false }) => {
+  try {
+    if (!projectId) throw new Error('Missing projectId');
+    const project = db.getProjectById(projectId);
+    if (!project) throw new Error('Project not found');
+    if (!project.audio_path) throw new Error('Project has no audio path to re-analyze');
+    // If there's an existing analysis, delete it unless force=false
+    if (project.analysis_id) {
+      // delete
+      db.deleteAnalysisById(project.analysis_id);
+      db.updateProjectAnalysisId(projectId, null);
     }
-  },
-);
+
+    // Start a fresh full analysis and attach it to the project
+    const res = await startFullAnalysis(project.audio_path, {}, projectId);
+    return res;
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+// Batch import handlers
+registerIpcHandler('LIBRARY:SCAN_DIRECTORY', async () => {
+  try {
+    let batchImporter = null;
+    try {
+      require('ts-node').register({ transpileOnly: true });
+      const bi = require('./services/batchImporter.ts');
+      batchImporter = bi && bi.default ? bi.default : bi;
+    } catch (e) {
+      const bi = require('./services/batchImporter');
+      batchImporter = bi && bi.default ? bi.default : bi;
+    }
+    
+    if (!batchImporter) throw new Error('Batch importer not available');
+    
+    // Use the library directory from the project root
+    const projectRoot = path.resolve(__dirname, '..');
+    const libraryRoot = path.join(projectRoot, 'library');
+    
+    console.log('[LIBRARY:SCAN_DIRECTORY] Scanning library root:', libraryRoot);
+    const { files, datasets } = batchImporter.scanLibraryDirectory(libraryRoot);
+    console.log('[LIBRARY:SCAN_DIRECTORY] Found', files.length, 'files across', Object.keys(datasets).length, 'datasets');
+    console.log('[LIBRARY:SCAN_DIRECTORY] Audio files:', files.filter(f => f.type === 'audio').length);
+    
+    const matched = batchImporter.matchFiles(files);
+    console.log('[LIBRARY:SCAN_DIRECTORY] Matched', matched.length, 'groups');
+    const stats = batchImporter.getDatasetStats(libraryRoot);
+    
+    return {
+      success: true,
+      files: files.length,
+      matched: matched.length,
+      datasets: Object.keys(datasets).length,
+      datasetStats: stats,
+      matchedGroups: matched.slice(0, 100), // Limit to first 100 for preview
+    };
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+registerIpcHandler('LIBRARY:BATCH_IMPORT', async (event, { groups, options = {} }) => {
+  try {
+    if (!groups || !Array.isArray(groups)) {
+      throw new Error('Missing groups array');
+    }
+    
+    const userDataPath = app.getPath('userData');
+    const results = [];
+    const errors = [];
+    
+    for (const group of groups) {
+      try {
+        // Only import groups with audio files (or JSON for reference datasets)
+        if (!group.audio && !group.json) {
+          console.log('[BATCH_IMPORT] Skipping group without audio or json:', group);
+          continue;
+        }
+        
+        // Verify audio file exists if provided
+        if (group.audio?.path && !fs.existsSync(group.audio.path)) {
+          console.warn('[BATCH_IMPORT] Audio file not found:', group.audio.path);
+          errors.push({ group, error: `Audio file not found: ${group.audio.path}` });
+          continue;
+        }
+        
+        // Copy lyrics file if present
+        let lyricsPath = null;
+        if (group.lyrics?.path && fs.existsSync(group.lyrics.path)) {
+          try {
+            const { randomUUID } = require('crypto');
+            const uuid = randomUUID();
+            lyricsPath = libraryService.copyFileToLibrary(userDataPath, group.lyrics.path, 'lyrics', uuid);
+            console.log('[BATCH_IMPORT] Copied lyrics file:', lyricsPath);
+          } catch (lyricsErr) {
+            console.warn('[BATCH_IMPORT] Failed to copy lyrics file:', lyricsErr);
+          }
+        }
+        
+        const payload = {
+          audioPath: group.audio?.path,
+          midiPath: group.midi?.path,
+          lyricsPath: lyricsPath,
+          title: group.title || group.audio?.metadata?.title || group.json?.metadata?.title || path.basename(group.audio?.path || group.json?.path || '', path.extname(group.audio?.path || group.json?.path || '')),
+          artist: group.artist || group.audio?.metadata?.artist || group.json?.metadata?.artist || '',
+          bpm: group.audio?.metadata?.bpm || group.json?.metadata?.bpm || null,
+          key: group.audio?.metadata?.key || group.json?.metadata?.key || null,
+          metadata: {
+            dataset: group.audio?.dataset || group.json?.dataset,
+            hasJson: !!group.json,
+            hasMidi: !!group.midi,
+            hasLab: !!group.lab,
+            hasLyrics: !!group.lyrics,
+            confidence: group.confidence,
+            jsonMetadata: group.json?.metadata,
+            lyricsPath: lyricsPath,
+          },
+        };
+        
+        console.log('[BATCH_IMPORT] Creating project:', payload.title, 'from', payload.audioPath || 'JSON only');
+        const result = libraryService.createProject(userDataPath, payload);
+        if (result.success) {
+          results.push(result);
+          
+          // If JSON has pre-analyzed data, create a synthetic analysis
+          if (group.json?.metadata && group.json.metadata.sections && options.importPreAnalyzed) {
+            try {
+              const linearAnalysis = {
+                metadata: {
+                  duration_seconds: group.json.metadata.sections?.[group.json.metadata.sections.length - 1]?.end_time || 0,
+                  detected_key: group.json.metadata.key || null,
+                  bpm: group.json.metadata.bpm || null,
+                },
+                events: (group.json.metadata.chords || []).map((c) => ({
+                  timestamp: c.timestamp || 0,
+                  event_type: 'chord',
+                  chord: c.chord || c,
+                })),
+              };
+              
+              const structuralMap = {
+                sections: (group.json.metadata.sections || []).map((s, idx) => ({
+                  section_id: `SECTION_${String.fromCharCode(65 + (idx % 26))}${Math.floor(idx / 26) + 1}`,
+                  section_label: s.section_label || 'unknown',
+                  section_variant: 1,
+                  time_range: {
+                    start_time: s.start_time || 0,
+                    end_time: s.end_time || 0,
+                    duration_bars: (s.end_time - s.start_time) / 2, // Approximate
+                  },
+                })),
+              };
+              
+              libraryService.saveAnalysisForProject(
+                result.id,
+                {
+                  ...linearAnalysis,
+                  structural_map: structuralMap,
+                },
+                app,
+              );
+            } catch (analysisErr) {
+              console.warn('[BatchImport] Failed to create pre-analyzed data:', analysisErr);
+            }
+          }
+        } else {
+          errors.push({ group, error: result.error });
+        }
+      } catch (err) {
+        errors.push({ group, error: err.message || String(err) });
+      }
+    }
+    
+    return {
+      success: true,
+      imported: results.length,
+      errors: errors.length,
+      results,
+      errors: errors.slice(0, 10), // Limit error details
+    };
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+});
 registerIpcHandler('ARCHITECT:UPDATE_BLOCKS', async (event, blocks = []) => {
   try {
     currentBlocks = Array.isArray(blocks) ? blocks : [];
-    console.log(
-      'ARCHITECT:UPDATE_BLOCKS received',
-      currentBlocks.length,
-      'blocks',
-    );
+    console.log('ARCHITECT:UPDATE_BLOCKS received', currentBlocks.length, 'blocks');
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('UI:BLOCKS_UPDATE', currentBlocks);
     }
@@ -1361,11 +1941,7 @@ registerIpcHandler('ARCHITECT:FORCE_SPLIT', async (event, { frame }) => {
 registerIpcHandler('ANALYSIS:LOAD_TO_ARCHITECT', async (event, fileHash) => {
   try {
     const analysis = db.getAnalysis(fileHash);
-    if (
-      !analysis ||
-      !analysis.structural_map ||
-      !analysis.structural_map.sections
-    ) {
+    if (!analysis || !analysis.structural_map || !analysis.structural_map.sections) {
       return { success: false, error: 'Analysis not found or invalid' };
     }
 
@@ -1394,13 +1970,7 @@ registerIpcHandler('ANALYSIS:LOAD_TO_ARCHITECT', async (event, fileHash) => {
         probability_score: section.probability_score || 0.5,
       };
 
-      console.log(
-        `Block ${index}:`,
-        block.id,
-        block.label,
-        block.length,
-        'bars',
-      );
+      console.log(`Block ${index}:`, block.id, block.label, block.length, 'bars');
       return block;
     });
 
@@ -1430,15 +2000,18 @@ registerIpcHandler('ANALYSIS:LOAD_TO_ARCHITECT', async (event, fileHash) => {
       console.warn('Main window not available for sending blocks');
     }
 
-    const noveltyCurve = analysis.structural_map.debug?.noveltyCurve || analysis.structural_map.debug?.novelty_curve || null;
-    
+    const noveltyCurve =
+      analysis.structural_map.debug?.noveltyCurve ||
+      analysis.structural_map.debug?.novelty_curve ||
+      null;
+
     // Store fileHash for AnalysisTuner access
     if (mainWindow && !mainWindow.isDestroyed()) {
       try {
         mainWindow.webContents.executeJavaScript(`window.__lastAnalysisHash = '${fileHash}';`);
       } catch (e) {}
     }
-    
+
     return { success: true, blocks, count: blocks.length, noveltyCurve };
   } catch (error) {
     console.error('Error loading analysis to Architect:', error);
@@ -1449,73 +2022,71 @@ registerIpcHandler('ANALYSIS:LOAD_TO_ARCHITECT', async (event, fileHash) => {
 // NOTE: Color & styling mapping is handled on the frontend.
 // Backend only emits `section_label` and related data.
 
-registerIpcHandler(
-  'ANALYSIS:GET_SECTION',
-  async (event, { analysisId, sectionId }) => {
-    const sections = db.getAnalysisSections(analysisId);
-    return sections.find((s) => s.section_id === sectionId);
-  },
-);
+registerIpcHandler('ANALYSIS:GET_SECTION', async (event, { analysisId, sectionId }) => {
+  const sections = db.getAnalysisSections(analysisId);
+  return sections.find((s) => s.section_id === sectionId);
+});
 
 registerIpcHandler('THEORY:GET_GENRE_PROFILE', async (event, genreName) => {
   return genreProfiles.getGenreProfile(genreName);
 });
 
-registerIpcHandler(
-  'THEORY:VALIDATE_PROGRESSION',
-  async (event, { chords, key, genre }) => {
-    // Validate chord sequence against theory rules
-    const genreProfile = genreProfiles.getGenreProfile(genre);
-    const keyContext = { primary_key: key, mode: 'ionian' };
+registerIpcHandler('THEORY:VALIDATE_PROGRESSION', async (event, { chords, key, genre }) => {
+  // Validate chord sequence against theory rules
+  const genreProfile = genreProfiles.getGenreProfile(genre);
+  const keyContext = { primary_key: key, mode: 'ionian' };
 
-    // Simplified validation - would use full theory engine
-    return {
-      valid: true,
-      suggestions: [],
-    };
-  },
-);
+  // Simplified validation - would use full theory engine
+  return {
+    valid: true,
+    suggestions: [],
+  };
+});
 
-registerIpcHandler(
-  'ANALYSIS:SET_METADATA',
-  async (event, { fileHash, metadata }) => {
-    const session = sessionManager.getSession(fileHash);
-    if (session) {
-      session.metadata = { ...session.metadata, ...metadata };
-      return { success: true };
-    }
-    return { success: false, error: 'Session not found' };
-  },
-);
+registerIpcHandler('ANALYSIS:SET_METADATA', async (event, { fileHash, metadata }) => {
+  const session = sessionManager.getSession(fileHash);
+  if (session) {
+    session.metadata = { ...session.metadata, ...metadata };
+    return { success: true };
+  }
+  return { success: false, error: 'Session not found' };
+});
 
 // Calibration handler - uses new optimization service
 registerIpcHandler('CALIBRATION:GET_BENCHMARKS', async (event) => {
   try {
     console.log('[IPC] CALIBRATION:GET_BENCHMARKS called');
-    
+
     // Try to load service if not already loaded
     if (!calibrationService) {
       console.log('[IPC] CalibrationService not loaded, attempting lazy load...');
       calibrationService = loadCalibrationService();
     }
-    
+
     if (!calibrationService) {
-      const errorMsg = 'CalibrationService not available. Check terminal for TypeScript compilation errors.';
+      const errorMsg =
+        'CalibrationService not available. Check terminal for TypeScript compilation errors.';
       console.error('[IPC]', errorMsg);
       throw new Error(errorMsg);
     }
-    
+
     console.log('[IPC] calibrationService:', calibrationService ? 'exists' : 'null');
-    
-    console.log('[IPC] calibrationService.getBenchmarks:', calibrationService?.getBenchmarks ? 'exists' : 'missing');
-    console.log('[IPC] Available methods:', calibrationService ? Object.keys(calibrationService) : 'N/A');
-    
+
+    console.log(
+      '[IPC] calibrationService.getBenchmarks:',
+      calibrationService?.getBenchmarks ? 'exists' : 'missing',
+    );
+    console.log(
+      '[IPC] Available methods:',
+      calibrationService ? Object.keys(calibrationService) : 'N/A',
+    );
+
     if (!calibrationService.getBenchmarks) {
       const errorMsg = `CalibrationService.getBenchmarks not found. Available: ${Object.keys(calibrationService || {}).join(', ')}`;
       console.error('[IPC]', errorMsg);
       throw new Error(errorMsg);
     }
-    
+
     const benchmarks = calibrationService.getBenchmarks();
     console.log('[IPC] CALIBRATION:GET_BENCHMARKS returning', benchmarks.length, 'benchmarks');
     return { success: true, benchmarks };
@@ -1532,11 +2103,13 @@ registerIpcHandler('CALIBRATION:RUN', async (event, { selectedIds = null }) => {
       console.log('[IPC] CalibrationService not loaded, attempting lazy load...');
       calibrationService = loadCalibrationService();
     }
-    
+
     if (!calibrationService) {
-      throw new Error('CalibrationService not available. Check terminal for TypeScript compilation errors.');
+      throw new Error(
+        'CalibrationService not available. Check terminal for TypeScript compilation errors.',
+      );
     }
-    
+
     // Send progress updates to renderer
     const sendProgress = (data) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1586,9 +2159,7 @@ function determineForm(sections) {
 function sendMacro(macroId) {
   // 1. Look up the macro in the database
   const database = db.getDb();
-  const stmt = database.prepare(
-    'SELECT name, actions_json FROM Mappings WHERE id = ?',
-  );
+  const stmt = database.prepare('SELECT name, actions_json FROM Mappings WHERE id = ?');
   const mapping = stmt.get([macroId]);
   stmt.free();
 

@@ -2,19 +2,46 @@ import path from 'node:path';
 import listener from '../electron/analysis/listener';
 import ChordAnalyzer from '../electron/analysis/chordAnalyzer';
 import { parseChordLab } from '../benchmarks/labParser';
+import { loadConfig } from '../electron/config/engineConfig';
 
 const ROOT = path.resolve(__dirname, '..');
 
-async function runSong(
-  songAudio: string,
-  chordLabPath: string,
-  opts: any = {},
-) {
+async function runSong(songAudio: string, chordLabPath: string, opts: any = {}) {
   console.log('Analyzing', songAudio);
+
+  // Load golden defaults and merge with provided options
+  let goldenDefaults;
+  try {
+    goldenDefaults = loadConfig();
+    console.log('Loaded golden defaults for benchmark');
+  } catch (e) {
+    console.warn(
+      'Failed to load engine config (no electron context), using hardcoded defaults:',
+      e.message,
+    );
+    // Hardcoded golden defaults when electron app is not available
+    goldenDefaults = {
+      chordOptions: {
+        temperature: 0.1,
+        transitionProb: 0.8,
+        diatonicBonus: 0.1,
+        rootPeakBias: 0.1,
+        globalKey: undefined,
+      },
+    };
+  }
+
+  const chordOpts = {
+    ...goldenDefaults.chordOptions,
+    ...opts, // Override with any provided options
+  };
+
+  console.log('Using chord options:', chordOpts);
+
   const res = await listener.analyzeAudio(songAudio, () => {});
   const la = res.linear_analysis;
   const analyzer = new ChordAnalyzer({ include7ths: true });
-  const beats = analyzer.detectChords(la, opts);
+  const beats = analyzer.detectChords(la, chordOpts);
   const gtSegments = parseChordLab(chordLabPath);
 
   // For each beat, find ground truth label
@@ -28,26 +55,16 @@ async function runSong(
         : la.metadata?.duration_seconds || beat.timestamp + 1;
     const duration = nextT - beat.timestamp;
     totalDuration += duration;
-    const gt = gtSegments.find(
-      (s) => beat.timestamp >= s.start && beat.timestamp < s.end,
-    );
+    const gt = gtSegments.find((s) => beat.timestamp >= s.start && beat.timestamp < s.end);
     const gtLabel = gt?.normalizedChord || null;
-    const gtRoot = gtLabel
-      ? gtLabel.replace(/m$|maj7$|m7$|7$|dim$|aug$/i, '')
-      : null;
-    const detRoot = beat.chord
-      ? beat.chord.replace(/m$|maj7$|m7$|7$|dim$|aug$/i, '')
-      : null;
+    const gtRoot = gtLabel ? gtLabel.replace(/m$|maj7$|m7$|7$|dim$|aug$/i, '') : null;
+    const detRoot = beat.chord ? beat.chord.replace(/m$|maj7$|m7$|7$|dim$|aug$/i, '') : null;
     const match =
-      gtRoot === detRoot ||
-      (gtRoot && detRoot && gtRoot.toUpperCase() === detRoot.toUpperCase());
+      gtRoot === detRoot || (gtRoot && detRoot && gtRoot.toUpperCase() === detRoot.toUpperCase());
     if (match) correctDuration += duration;
   }
-  const accuracy =
-    totalDuration > 0 ? (correctDuration / totalDuration) * 100 : 0;
-  console.log(
-    `Song: ${path.basename(songAudio)} Accuracy: ${accuracy.toFixed(2)}%`,
-  );
+  const accuracy = totalDuration > 0 ? (correctDuration / totalDuration) * 100 : 0;
+  console.log(`Song: ${path.basename(songAudio)} Accuracy: ${accuracy.toFixed(2)}%`);
   return accuracy;
 }
 
@@ -55,47 +72,17 @@ async function runAll() {
   const songs = [
     {
       name: 'Let It Be',
-      audio: path.resolve(
-        ROOT,
-        'electron',
-        'analysis',
-        'test',
-        '06 Let It Be.mp3',
-      ),
-      chord: path.resolve(
-        ROOT,
-        'electron',
-        'analysis',
-        'test',
-        '06_-_Let_It_Be_chord.lab',
-      ),
+      audio: path.resolve(ROOT, 'electron', 'analysis', 'test', '06 Let It Be.mp3'),
+      chord: path.resolve(ROOT, 'electron', 'analysis', 'test', '06_-_Let_It_Be_chord.lab'),
     },
     {
       name: 'Come Together',
-      audio: path.resolve(
-        ROOT,
-        'electron',
-        'analysis',
-        'test',
-        '01 Come Together.mp3',
-      ),
-      chord: path.resolve(
-        ROOT,
-        'electron',
-        'analysis',
-        'test',
-        '01_-_Come_Together_chord.lab',
-      ),
+      audio: path.resolve(ROOT, 'electron', 'analysis', 'test', '01 Come Together.mp3'),
+      chord: path.resolve(ROOT, 'electron', 'analysis', 'test', '01_-_Come_Together_chord.lab'),
     },
     {
       name: 'Maxwell',
-      audio: path.resolve(
-        ROOT,
-        'electron',
-        'analysis',
-        'test',
-        "03 Maxwell's Silver Hammer.mp3",
-      ),
+      audio: path.resolve(ROOT, 'electron', 'analysis', 'test', "03 Maxwell's Silver Hammer.mp3"),
       chord: path.resolve(
         ROOT,
         'electron',
@@ -142,8 +129,7 @@ async function runAll() {
         console.log('Tuning: applying stronger diatonic bias result:', acc);
       }
     }
-    if (acc < 70)
-      console.log(`Warning: ${s.name} accuracy below 70%: ${acc.toFixed(2)}%`);
+    if (acc < 70) console.log(`Warning: ${s.name} accuracy below 70%: ${acc.toFixed(2)}%`);
   }
 }
 

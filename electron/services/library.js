@@ -2,26 +2,30 @@ const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
 const db = require('../db');
+const { getInstance: getPathConfig } = require('./pathConfig');
 
-function ensureDirs(userDataPath) {
-  const libDir = path.join(userDataPath, 'library');
-  const audioDir = path.join(libDir, 'audio');
-  const midiDir = path.join(libDir, 'midi');
-  if (!fs.existsSync(libDir)) fs.mkdirSync(libDir);
-  if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir);
-  if (!fs.existsSync(midiDir)) fs.mkdirSync(midiDir);
-  return { libDir, audioDir, midiDir };
-}
-
-function copyFileToLibrary(userDataPath, srcPath, destSubDir, uuid) {
-  const { audioDir, midiDir } = ensureDirs(userDataPath);
+function copyFileToLibrary(userDataPath, srcPath, destSubDir, metadata) {
+  const pathConfig = getPathConfig();
   const ext = path.extname(srcPath);
-  const baseName = path.basename(srcPath);
-  const destDir = destSubDir === 'audio' ? audioDir : midiDir;
-  const destFilename = `${uuid}-${baseName}`;
+  
+  // Get the appropriate directory based on file type
+  const destDir = pathConfig.getPath(destSubDir);
+  
+  // Generate organized filename
+  const destFilename = pathConfig.generateFilename(
+    { ...metadata, uuid: metadata.uuid || randomUUID() },
+    ext
+  );
   const destPath = path.join(destDir, destFilename);
 
+  // Copy to primary location
   fs.copyFileSync(srcPath, destPath);
+  
+  // Optionally backup to cloud
+  pathConfig.backupToCloud(destPath, destSubDir).catch(err => {
+    console.warn(`[Library] Cloud backup failed for ${destFilename}:`, err);
+  });
+
   return destPath;
 }
 
@@ -44,12 +48,19 @@ function createProject(userDataPath, payload) {
   let audio_path = null;
   let midi_path = null;
   try {
+    const fileMetadata = {
+      uuid,
+      title,
+      artist,
+      projectId: null, // Will be set after DB insert
+    };
+
     if (payload.audioPath) {
       audio_path = copyFileToLibrary(
         userDataPath,
         payload.audioPath,
         'audio',
-        uuid,
+        fileMetadata,
       );
     }
 
@@ -58,7 +69,7 @@ function createProject(userDataPath, payload) {
         userDataPath,
         payload.midiPath,
         'midi',
-        uuid,
+        fileMetadata,
       );
     }
 

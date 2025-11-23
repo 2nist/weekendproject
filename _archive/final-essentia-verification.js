@@ -17,10 +17,10 @@ async function verifyEssentia() {
     const essentia = await loader.getEssentiaInstance();
     
     if (!essentia) {
-      console.error('✗ FAILED: Essentia instance is null');
+      console.error('FAILED: Essentia instance is null');
       return false;
     }
-    console.log('✓ Essentia loaded successfully');
+    console.log('Essentia loaded successfully');
     console.log('');
 
     // Test 2: Check for required methods
@@ -28,10 +28,10 @@ async function verifyEssentia() {
     const required = ['arrayToVector', 'vectorToArray', 'Chromagram'];
     const missing = required.filter(m => typeof essentia[m] !== 'function');
     if (missing.length > 0) {
-      console.error(`✗ Missing methods: ${missing.join(', ')}`);
+      console.error(`Missing methods: ${missing.join(', ')}`);
       return false;
     }
-    console.log('✓ All required methods available');
+    console.log('All required methods available');
     console.log('');
 
     // Test 3: Test with simple audio analysis
@@ -43,8 +43,8 @@ async function verifyEssentia() {
     const fs = require('fs');
     
     if (!fs.existsSync(testFile)) {
-      console.log('⚠ Test file not found, skipping full pipeline test');
-      console.log('✓ Essentia loader is working correctly');
+      console.log('Test file not found, skipping full pipeline test');
+      console.log('Essentia loader is working correctly');
       return true;
     }
 
@@ -59,27 +59,27 @@ async function verifyEssentia() {
         }
       });
       
-      console.log('\n   ✓ Analysis completed successfully');
+      console.log('\n   Analysis completed successfully');
       console.log(`   - Has chroma_frames: ${analysisResult.linear_analysis.chroma_frames?.length > 0}`);
       console.log(`   - Has beat_grid: ${!!analysisResult.linear_analysis.beat_grid}`);
       console.log(`   - Has metadata: ${!!analysisResult.linear_analysis.metadata}`);
       
       if (analysisResult.linear_analysis.chroma_frames?.length > 0) {
-        console.log('   ✓ Essentia is processing audio correctly');
+        console.log('   Essentia is processing audio correctly');
         return true;
       } else {
-        console.log('   ⚠ Analysis completed but no chroma frames (may be using fallback)');
+        console.log('   Analysis completed but no chroma frames (may be using fallback)');
         return false;
       }
     } catch (error) {
-      console.error(`\n   ✗ Analysis failed: ${error.message}`);
+      console.error(`\n   Analysis failed: ${error.message}`);
       if (error.stack) {
         console.error('   Stack:', error.stack.split('\n').slice(0, 3).join('\n'));
       }
       return false;
     }
   } catch (error) {
-    console.error(`\n✗ VERIFICATION FAILED: ${error.message}`);
+    console.error(`\nVERIFICATION FAILED: ${error.message}`);
     if (error.stack) {
       console.error('Stack:', error.stack.split('\n').slice(0, 5).join('\n'));
     }
@@ -91,14 +91,14 @@ verifyEssentia().then(success => {
   console.log('');
   console.log('='.repeat(80));
   if (success) {
-    console.log('✅ ESSENTIA IS VERIFIED AND WORKING');
+    console.log('ESSENTIA IS VERIFIED AND WORKING');
   } else {
-    console.log('❌ ESSENTIA VERIFICATION FAILED');
+    console.log('ESSENTIA VERIFICATION FAILED');
   }
   console.log('='.repeat(80));
   process.exit(success ? 0 : 1);
 }).catch(error => {
-  console.error('\n✗ VERIFICATION ERROR:', error.message);
+  console.error('\nVERIFICATION ERROR:', error.message);
   process.exit(1);
 });
 

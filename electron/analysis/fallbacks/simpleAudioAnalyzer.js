@@ -11,7 +11,7 @@ const {
   calculateChromaFlux,
   calculateChromaEntropy,
   detectVocalPresence,
-} = require('./semanticUtils');
+} = require('../semanticUtils');
 
 /**
  * Simple beat detection using autocorrelation

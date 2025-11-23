@@ -10,8 +10,10 @@ module.exports = {
         sm: 'calc(var(--radius) - 4px)',
       },
       fontFamily: {
-        sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
-        mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
+        sans: ['var(--font-sans)'],
+        mono: ['var(--font-mono)'],
+        serif: ['var(--font-serif)'],
+        display: ['var(--font-display)'],
       },
       colors: {
         background: 'hsl(var(--background))',
@@ -54,7 +56,7 @@ module.exports = {
           4: 'hsl(var(--chart-4))',
           5: 'hsl(var(--chart-5))',
         },
-        // 🔴 NEW: Semantic Music Tokens
+        // NEW: Semantic Music Tokens
         music: {
           kick: {
             DEFAULT: 'hsl(var(--music-kick))',

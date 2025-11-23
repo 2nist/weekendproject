@@ -455,7 +455,8 @@ function getAnalysisById(analysisId) {
 
 function getMostRecentAnalysis() {
   console.log('DB: Getting most recent analysis');
-  const stmt = db.prepare('SELECT * FROM AudioAnalysis ORDER BY created_at DESC LIMIT 1');
+  // AudioAnalysis table uses 'analysis_timestamp' rather than created_at
+  const stmt = db.prepare('SELECT * FROM AudioAnalysis ORDER BY COALESCE(analysis_timestamp, id) DESC LIMIT 1');
   let row = null;
   if (stmt.step()) {
     row = stmt.getAsObject();
@@ -472,7 +473,7 @@ function getMostRecentAnalysis() {
     arrangement_flow: JSON.parse(row.arrangement_flow_json || '{}'),
     harmonic_context: JSON.parse(row.harmonic_context_json || '{}'),
     polyrhythmic_layers: JSON.parse(row.polyrhythmic_layers_json || '[]'),
-    created_at: row.created_at,
+    created_at: row.analysis_timestamp || null,
   };
 }
 
