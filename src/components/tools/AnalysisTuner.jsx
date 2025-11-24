@@ -1,6 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import Button from '@/components/ui/Button';
+import Button from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import KeySelector from '@/components/tools/KeySelector';
 import { Loader2, CheckCircle2 } from 'lucide-react';
@@ -22,6 +22,39 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
   // Local settings state - updates instantly on slider move
   const [localSettings, setLocalSettings] = useState(DEFAULTS);
   const [selectedKey, setSelectedKey] = useState('');
+  
+  // Load saved settings from database on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const ipcAPI = globalThis?.electronAPI?.invoke || globalThis?.ipc?.invoke;
+        if (!ipcAPI) return;
+        
+        const settings = await ipcAPI('DB:GET_SETTINGS');
+        if (settings) {
+          const loadedSettings = {
+            transitionProb: parseFloat(settings.analysis_transitionProb) || DEFAULTS.transitionProb,
+            diatonicBonus: parseFloat(settings.analysis_diatonicBonus) || DEFAULTS.diatonicBonus,
+            rootPeakBias: parseFloat(settings.analysis_rootPeakBias) || DEFAULTS.rootPeakBias,
+            temperature: parseFloat(settings.analysis_temperature) || DEFAULTS.temperature,
+            noveltyKernel: parseInt(settings.analysis_noveltyKernel) || DEFAULTS.noveltyKernel,
+            detailLevel: parseFloat(settings.analysis_detailLevel) || DEFAULTS.detailLevel,
+            adaptiveSensitivity: parseFloat(settings.analysis_adaptiveSensitivity) || DEFAULTS.adaptiveSensitivity,
+            mfccWeight: parseFloat(settings.analysis_mfccWeight) || DEFAULTS.mfccWeight,
+          };
+          setLocalSettings(loadedSettings);
+          
+          if (settings.analysis_globalKey) {
+            setSelectedKey(settings.analysis_globalKey);
+          }
+        }
+      } catch (err) {
+        console.warn('[AnalysisTuner] Failed to load settings:', err);
+      }
+    };
+    
+    loadSettings();
+  }, []);
   
   // Loading states
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -139,8 +172,19 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
 
   // Handle Harmony Preview (chord recalculation)
   const handleHarmonyPreview = useCallback(async () => {
-    if (!fileHash) {
-      console.error('[AnalysisTuner] No fileHash provided');
+    // Try to get fileHash from multiple sources if not provided as prop
+    let currentFileHash = fileHash;
+    if (!currentFileHash) {
+      currentFileHash = 
+        globalThis.__lastAnalysisHash || 
+        globalThis.__currentFileHash ||
+        globalThis.__lastAnalysisData?.fileHash;
+    }
+    
+    if (!currentFileHash) {
+      const errorMsg = 'No analysis file hash available. Please run an analysis first.';
+      console.error('[AnalysisTuner]', errorMsg);
+      alert(errorMsg);
       return;
     }
 
@@ -155,7 +199,7 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
       }
 
       const result = await ipcAPI('ANALYSIS:RECALC_CHORDS', {
-        fileHash,
+        fileHash: currentFileHash,
         options: {
           ...localSettings,
           globalKey: selectedKey,
@@ -180,8 +224,19 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
 
   // Handle Harmony Commit
   const handleHarmonyCommit = useCallback(async () => {
-    if (!fileHash) {
-      console.error('[AnalysisTuner] No fileHash provided');
+    // Try to get fileHash from multiple sources if not provided as prop
+    let currentFileHash = fileHash;
+    if (!currentFileHash) {
+      currentFileHash = 
+        globalThis.__lastAnalysisHash || 
+        globalThis.__currentFileHash ||
+        globalThis.__lastAnalysisData?.fileHash;
+    }
+    
+    if (!currentFileHash) {
+      const errorMsg = 'No analysis file hash available. Please run an analysis first.';
+      console.error('[AnalysisTuner]', errorMsg);
+      alert(errorMsg);
       return;
     }
 
@@ -196,7 +251,7 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
       }
 
       const result = await ipcAPI('ANALYSIS:RECALC_CHORDS', {
-        fileHash,
+        fileHash: currentFileHash,
         options: {
           ...localSettings,
           globalKey: selectedKey,

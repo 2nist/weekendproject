@@ -1,4 +1,5 @@
 import axios from 'axios';
+const logger = require('../analysis/logger');
 
 const BASE_URL = 'https://lrclib.net/api';
 
@@ -18,7 +19,7 @@ export async function fetchLyrics(artist: string, title: string): Promise<Lyrics
     // 1. Search for the track
     const query = new URLSearchParams({
       artist_name: artist,
-      track_name: title
+      track_name: title,
     });
 
     const res = await axios.get(`${BASE_URL}/get?${query}`);
@@ -27,12 +28,12 @@ export async function fetchLyrics(artist: string, title: string): Promise<Lyrics
       return {
         plain: res.data.plainLyrics,
         synced: res.data.syncedLyrics,
-        id: res.data.id
+        id: res.data.id,
       };
     }
     return null;
   } catch (e) {
-    console.warn(`[Lyrics] Not found for ${artist} - ${title}`);
+    logger.warn(`[Lyrics] Not found for ${artist} - ${title}`);
     return null;
   }
 }

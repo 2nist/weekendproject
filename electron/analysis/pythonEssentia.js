@@ -2,6 +2,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const logger = require('./logger');
 
 /**
  * Check if Python is available and has required libraries
@@ -15,13 +16,13 @@ async function checkPythonEssentia() {
     let attempts = 0;
     const tryNext = () => {
       if (attempts >= pythonCommands.length) {
-        console.warn('[PythonBridge] No Python found in PATH');
+        logger.warn('[PythonBridge] No Python found in PATH');
         resolve(false);
         return;
       }
 
       const pythonCmd = pythonCommands[attempts++];
-      console.log(`[PythonBridge] Checking for ${pythonCmd}...`);
+      logger.debug(`[PythonBridge] Checking for ${pythonCmd}...`);
 
       const pythonProcess = spawn(pythonCmd, ['--version']);
       pythonProcess.on('error', () => {
@@ -57,19 +58,19 @@ async function checkLibrosa(pythonCmd) {
     });
 
     checkProcess.on('error', () => {
-      console.warn(`[PythonBridge] Failed to spawn ${pythonCmd} for library check`);
+      logger.warn(`[PythonBridge] Failed to spawn ${pythonCmd} for library check`);
       resolve(false);
     });
 
     checkProcess.on('close', (code) => {
       if (code === 0 && output.includes('OK')) {
-        console.log(
+        logger.info(
           `[PythonBridge] ✅ Python with librosa/numpy/scipy is available (${pythonCmd})`,
         );
         resolve(true);
       } else {
-        console.warn(`[PythonBridge] ❌ Python found but librosa/numpy/scipy not installed`);
-        console.warn(`[PythonBridge] Install with: pip install librosa numpy scipy`);
+        logger.warn(`[PythonBridge] ❌ Python found but librosa/numpy/scipy not installed`);
+        logger.warn(`[PythonBridge] Install with: pip install librosa numpy scipy`);
         resolve(false);
       }
     });
@@ -86,15 +87,15 @@ async function analyzeAudioWithPython(filePath, progressCallback = () => {}) {
     logger.pass1(`[PythonBridge] Spawning analysis for: ${path.basename(filePath)}`);
     // Task 3: Consolidated - Use canonical name
     const scriptPath = path.join(__dirname, 'analyze_song.py');
-    
+
     // Task 1: Connection Check - Verify which script is being used
     logger.pass1(`[PythonBridge] Targeted Script: ${scriptPath}`);
     logger.pass1(`[PythonBridge] Script exists: ${fs.existsSync(scriptPath)}`);
-    
+
     if (!fs.existsSync(scriptPath)) {
       return reject(new Error(`Python script not found at: ${scriptPath}`));
     }
-    
+
     logger.debug(`[PythonBridge] Using canonical Python analyzer script: analyze_song.py`);
 
     // Determine which Python command to use
@@ -116,11 +117,62 @@ async function analyzeAudioWithPython(filePath, progressCallback = () => {}) {
 
     logger.debug(`[PythonBridge] Using Python command: ${pythonCmd}`);
 
-    // '-u' forces unbuffered output so we get progress updates in real-time
-    const pythonProcess = spawn(pythonCmd, ['-u', scriptPath, filePath]);
+    // ✅ FIX: Add timeout and cleanup
+    const TIMEOUT_MS = 300000; // 5 minutes
+    let pythonProcess = null;
+    let timeoutId = null;
     let outputBuffer = '';
     let errorString = '';
     let resultHandled = false;
+
+    // ✅ Cleanup function to prevent zombie processes
+    const cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+
+      if (pythonProcess && !pythonProcess.killed) {
+        try {
+          logger.debug('[PythonBridge] Killing python process...');
+          pythonProcess.kill('SIGTERM');
+
+          // Force kill after 5 seconds if still alive
+          setTimeout(() => {
+            if (pythonProcess && !pythonProcess.killed) {
+              logger.warn('[PythonBridge] Force killing python process (SIGKILL)');
+              pythonProcess.kill('SIGKILL');
+            }
+          }, 5000);
+        } catch (e) {
+          logger.warn('[PythonBridge] Failed to kill process:', e.message);
+        }
+      }
+
+      // ✅ Remove all event listeners to prevent memory leaks
+      if (pythonProcess) {
+        try {
+          pythonProcess.stdout?.removeAllListeners();
+          pythonProcess.stderr?.removeAllListeners();
+          pythonProcess.removeAllListeners();
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+      }
+    };
+
+    // '-u' forces unbuffered output so we get progress updates in real-time
+    pythonProcess = spawn(pythonCmd, ['-u', scriptPath, filePath]);
+
+    // ✅ Set timeout to prevent hanging forever
+    timeoutId = setTimeout(() => {
+      if (!resultHandled) {
+        resultHandled = true;
+        logger.error('[PythonBridge] Python analysis timeout (5 minutes)');
+        cleanup();
+        reject(new Error('Python analysis timeout (5 minutes)'));
+      }
+    }, TIMEOUT_MS);
 
     pythonProcess.stdout.on('data', (data) => {
       outputBuffer += data.toString();
@@ -139,7 +191,7 @@ async function analyzeAudioWithPython(filePath, progressCallback = () => {}) {
                 logger.debug(`[PythonBridge] Stage: ${msg.stage} (${msg.value}%)`);
               }
             } catch (e) {
-              console.warn('Progress callback error:', e.message);
+              logger.warn('Progress callback error:', e.message);
             }
             continue;
           }
@@ -150,7 +202,8 @@ async function analyzeAudioWithPython(filePath, progressCallback = () => {}) {
               const finalResult = JSON.parse(raw);
               fs.unlinkSync(msg.path);
               resultHandled = true;
-              
+              cleanup(); // ✅ Cleanup on success
+
               // Log what we got from Python
               const detectedKey = finalResult?.linear_analysis?.metadata?.detected_key;
               const detectedMode = finalResult?.linear_analysis?.metadata?.detected_mode;
@@ -158,18 +211,22 @@ async function analyzeAudioWithPython(filePath, progressCallback = () => {}) {
               logger.pass1(
                 `[PythonBridge] ✅ Analysis complete - Key: ${detectedKey || 'NOT SET'}, Mode: ${detectedMode || 'NOT SET'}, TimeSig: ${timeSig || 'NOT SET'}`,
               );
-              
+
               return resolve({ ...finalResult, source: 'python_librosa' });
             } catch (err) {
+              resultHandled = true;
+              cleanup(); // ✅ Cleanup on error
               return reject(new Error(`Failed to read result file: ${err.message}`));
             }
           }
           if (msg.error) {
+            resultHandled = true;
+            cleanup(); // ✅ Cleanup on error
             return reject(new Error(msg.error));
           }
         } catch (err) {
           // ignore partial/non-JSON lines
-          console.debug('pythonEssentia: non-json stdout line', err?.message || err);
+          logger.debug('pythonEssentia: non-json stdout line', err?.message || err);
         }
       }
     });
@@ -177,13 +234,15 @@ async function analyzeAudioWithPython(filePath, progressCallback = () => {}) {
     pythonProcess.stderr.on('data', (data) => {
       const msg = data.toString();
       if (!msg.includes('UserWarning') && !msg.includes('FutureWarning')) {
-        console.error(`[Python stderr]: ${msg}`);
+        logger.error(`[Python stderr]: ${msg}`);
         errorString += msg;
       }
     });
 
     pythonProcess.on('close', (code) => {
       if (!resultHandled) {
+        resultHandled = true;
+        cleanup(); // ✅ Cleanup on close
         if (code !== 0) {
           return reject(new Error(`Python analysis failed (Code ${code})`));
         }
@@ -191,7 +250,13 @@ async function analyzeAudioWithPython(filePath, progressCallback = () => {}) {
       }
     });
 
-    pythonProcess.on('error', (err) => reject(new Error(`Python spawn failed: ${err.message}`)));
+    pythonProcess.on('error', (err) => {
+      if (!resultHandled) {
+        resultHandled = true;
+        cleanup(); // ✅ Cleanup on error
+        reject(new Error(`Python spawn failed: ${err.message}`));
+      }
+    });
   });
 }
 

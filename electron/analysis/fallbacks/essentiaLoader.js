@@ -6,6 +6,7 @@
 let essentiaInstance = null;
 let isEssentiaLoaded = false;
 let EssentiaVersion = 'unknown';
+const logger = require('../logger');
 
 /**
  * Load Essentia library components
@@ -13,7 +14,7 @@ let EssentiaVersion = 'unknown';
 function loadEssentia() {
   try {
     const essentiaModule = require('essentia.js');
-    
+
     // Handle different export structures (npm vs dist)
     const EssentiaWASM = essentiaModule.EssentiaWASM || essentiaModule.default?.EssentiaWASM;
     const EssentiaFactory = essentiaModule.Essentia || essentiaModule.default?.Essentia;
@@ -21,7 +22,7 @@ function loadEssentia() {
     if (!EssentiaFactory) {
       throw new Error('Essentia constructor not found in module exports');
     }
-    
+
     // Store version if available
     if (essentiaModule.version) EssentiaVersion = essentiaModule.version;
 
@@ -36,27 +37,27 @@ function loadEssentia() {
  */
 async function getEssentiaInstance() {
   if (isEssentiaLoaded && essentiaInstance) {
-    console.log('[EssentiaLoader] Using cached Essentia instance');
+    logger.debug('[EssentiaLoader] Using cached Essentia instance');
     return essentiaInstance;
   }
 
   try {
-    console.log('[EssentiaLoader] Initializing Essentia.js...');
+    logger.info('[EssentiaLoader] Initializing Essentia.js...');
     const { EssentiaWASM, EssentiaFactory } = loadEssentia();
 
     let wasmModule = EssentiaWASM;
-    
+
     // Modern Emscripten builds return a Promise
     if (typeof EssentiaWASM === 'function') {
       // Locate the WASM file manually if needed for Electron packing
       // (This helps if the .wasm file is packed inside .asar)
       const path = require('path');
       const wasmPath = path.resolve(require.resolve('essentia.js'), '..', 'essentia-wasm.wasm');
-      
+
       // Pass locateFile overrides if your specific version requires it
       // Otherwise, call standard init
       wasmModule = await EssentiaWASM({
-         // locateFile: (path) => wasmPath // Uncomment if Electron fails to find WASM
+        // locateFile: (path) => wasmPath // Uncomment if Electron fails to find WASM
       });
     }
 
@@ -67,15 +68,17 @@ async function getEssentiaInstance() {
     essentiaInstance = new EssentiaFactory(wasmModule);
     isEssentiaLoaded = true;
 
-    console.log(`[EssentiaLoader] ✅ Essentia.js initialized (v${essentiaInstance?.version || EssentiaVersion})`);
+    logger.info(
+      `[EssentiaLoader] ✅ Essentia.js initialized (v${essentiaInstance?.version || EssentiaVersion})`,
+    );
     return essentiaInstance;
   } catch (error) {
-    console.error('[EssentiaLoader] ❌ CRITICAL: Failed to load Essentia.js:', error.message);
-    console.error('[EssentiaLoader] Error stack:', error.stack);
-    console.error('[EssentiaLoader] This may be due to:');
-    console.error('[EssentiaLoader]   - Missing essentia.js package: npm install essentia.js');
-    console.error('[EssentiaLoader]   - WASM file not found or corrupted');
-    console.error('[EssentiaLoader]   - Electron context isolation issues');
+    logger.error('[EssentiaLoader] ❌ CRITICAL: Failed to load Essentia.js:', error.message);
+    logger.debug('[EssentiaLoader] Error stack:', error.stack);
+    logger.warn('[EssentiaLoader] This may be due to:');
+    logger.warn('[EssentiaLoader]   - Missing essentia.js package: npm install essentia.js');
+    logger.warn('[EssentiaLoader]   - WASM file not found or corrupted');
+    logger.warn('[EssentiaLoader]   - Electron context isolation issues');
     return null;
   }
 }
@@ -99,10 +102,12 @@ async function loadAudioFile(filePath, targetSampleRate = 44100) {
   if (ext === '.wav') {
     const buffer = fs.readFileSync(filePath);
     const audioData = await wavDecoder.decode(buffer);
-    
+
     // Check sample rate mismatch
     if (audioData.sampleRate !== targetSampleRate) {
-        console.warn(`Warning: Audio file is ${audioData.sampleRate}Hz, but analysis expects ${targetSampleRate}Hz. Results may be frequency-shifted.`);
+      logger.warn(
+        `Warning: Audio file is ${audioData.sampleRate}Hz, but analysis expects ${targetSampleRate}Hz. Results may be frequency-shifted.`,
+      );
     }
 
     let samples;
@@ -114,7 +119,7 @@ async function loadAudioFile(filePath, targetSampleRate = 44100) {
       const right = audioData.channelData[1];
       const length = left.length;
       samples = new Float32Array(length);
-      
+
       // Fast mixdown
       for (let i = 0; i < length; i++) {
         samples[i] = (left[i] + right[i]) * 0.5;

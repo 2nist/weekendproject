@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 
 const FRAME_HOP_SECONDS = 0.1;
+const logger = require('./logger');
 const MIN_SECTION_SECONDS = 1.5; // Allow short transitions (was 2.0)
 const MIN_SECTION_FRAMES = Math.round(MIN_SECTION_SECONDS / FRAME_HOP_SECONDS);
 const NOVELTY_KERNEL_SIZE = 14;
@@ -48,20 +49,14 @@ function buildSimilarityMatrix(chroma, mfcc, rms, flux) {
     mfcc && mfcc.length === n
       ? mfcc
       : mfcc
-        ? new Array(n)
-            .fill(0)
-            .map((_, i) => mfcc[Math.floor((i / n) * mfcc.length)] || [])
+        ? new Array(n).fill(0).map((_, i) => mfcc[Math.floor((i / n) * mfcc.length)] || [])
         : null;
   for (let i = 0; i < n; i += step)
     for (let j = 0; j < n; j += step) {
       const cs = cosineSimilarity(chroma[i] || [], chroma[j] || []);
-      const sM = alignedMFCC
-        ? cosineSimilarity(alignedMFCC[i] || [], alignedMFCC[j] || [])
-        : cs;
+      const sM = alignedMFCC ? cosineSimilarity(alignedMFCC[i] || [], alignedMFCC[j] || []) : cs;
       const vRms =
-        rms && rms[i] !== undefined && rms[j] !== undefined
-          ? 1 - Math.abs(rms[i] - rms[j])
-          : 1;
+        rms && rms[i] !== undefined && rms[j] !== undefined ? 1 - Math.abs(rms[i] - rms[j]) : 1;
       const vFlux =
         flux && flux[i] !== undefined && flux[j] !== undefined
           ? 1 - Math.abs(flux[i] - flux[j])
@@ -109,8 +104,7 @@ function applyMedianFilter(series, windowSize) {
   const out = new Float32Array(series.length);
   for (let i = 0; i < series.length; i++) {
     const w = [];
-    for (let k = i - half; k <= i + half; k++)
-      if (k >= 0 && k < series.length) w.push(series[k]);
+    for (let k = i - half; k <= i + half; k++) if (k >= 0 && k < series.length) w.push(series[k]);
     w.sort((a, b) => a - b);
     const m = Math.floor(w.length / 2);
     out[i] = w.length % 2 === 0 ? (w[m - 1] + w[m]) / 2 : w[m];
@@ -150,12 +144,8 @@ function detectNovelty(matrixObj, chroma = [], mfcc = null) {
     temporalFlux[i] /= maxFx;
   }
   const combined = new Float32Array(n);
-  for (let i = 0; i < n; i++)
-    combined[i] = 0.7 * novelty[i] + 0.3 * temporalFlux[i];
-  const sm = smoothSeries(
-    combined,
-    Math.max(3, Math.round(1.5 / FRAME_HOP_SECONDS)),
-  );
+  for (let i = 0; i < n; i++) combined[i] = 0.7 * novelty[i] + 0.3 * temporalFlux[i];
+  const sm = smoothSeries(combined, Math.max(3, Math.round(1.5 / FRAME_HOP_SECONDS)));
   const filtered = applyMedianFilter(sm, Math.round(2.0 / FRAME_HOP_SECONDS));
   const config = loadConfig();
   const rawBase = config.novelty_threshold ?? 0.05;
@@ -165,16 +155,11 @@ function detectNovelty(matrixObj, chroma = [], mfcc = null) {
   function findPeaks(th) {
     const picks = [0];
     for (let i = 1; i < filtered.length - 1; i++) {
-      if (
-        filtered[i] > th &&
-        filtered[i] > filtered[i - 1] &&
-        filtered[i] > filtered[i + 1]
-      ) {
+      if (filtered[i] > th && filtered[i] > filtered[i - 1] && filtered[i] > filtered[i + 1]) {
         const last = picks[picks.length - 1];
         const dist = i - last;
         const isFarEnough = dist >= MIN_SECTION_FRAMES;
-        const isStrongSignal =
-          dist >= Math.round(1 / FRAME_HOP_SECONDS) && filtered[i] > th * 2;
+        const isStrongSignal = dist >= Math.round(1 / FRAME_HOP_SECONDS) && filtered[i] > th * 2;
         if (isFarEnough || isStrongSignal) picks.push(i);
       }
     }
@@ -185,22 +170,20 @@ function detectNovelty(matrixObj, chroma = [], mfcc = null) {
   if (boundaries.length <= 2) {
     const retryThreshold = computeAdaptiveThreshold(filtered, 0.8);
     const retry = Math.max(retryThreshold, MIN_NOISE_FLOOR);
-    console.log('Architect: Under-segmented. Retrying with K=0.8');
+    logger.warn('Architect: Under-segmented. Retrying with K=0.8');
     boundaries = findPeaks(retry);
   }
   if (boundaries.length > 24) {
     const strictThreshold = computeAdaptiveThreshold(filtered, 3);
     const strict = Math.max(strictThreshold, MIN_NOISE_FLOOR);
-    console.log('Architect: Over-segmented. Raising K=3.0');
+    logger.warn('Architect: Over-segmented. Raising K=3.0');
     boundaries = findPeaks(strict);
   }
   if (mfcc && mfcc.length) {
     const aligned =
       mfcc.length === n
         ? mfcc
-        : new Array(n)
-            .fill(0)
-            .map((_, i) => mfcc[Math.floor((i / n) * mfcc.length)] || []);
+        : new Array(n).fill(0).map((_, i) => mfcc[Math.floor((i / n) * mfcc.length)] || []);
     const mfFlux = new Float32Array(n);
     for (let i = 1; i < n; i++) {
       const cs = cosineSimilarity(aligned[i] || [], aligned[i - 1] || []);
@@ -217,11 +200,7 @@ function detectNovelty(matrixObj, chroma = [], mfcc = null) {
       for (let i = a + 1; i < b - 1; i++) localMax = Math.max(localMax, mfS[i]);
       const localThreshold = Math.max(localMax * 0.25, maxM * 0.15);
       for (let i = a + 1; i < b - 1; i++) {
-        if (
-          mfS[i] > localThreshold &&
-          mfS[i] > mfS[i - 1] &&
-          mfS[i] > mfS[i + 1]
-        ) {
+        if (mfS[i] > localThreshold && mfS[i] > mfS[i - 1] && mfS[i] > mfS[i + 1]) {
           if (
             mfS[i] >= maxM * 0.4 ||
             (i - a >= MIN_SECTION_FRAMES && b - i >= MIN_SECTION_FRAMES)
@@ -232,9 +211,7 @@ function detectNovelty(matrixObj, chroma = [], mfcc = null) {
       }
     }
     if (extra.length)
-      boundaries = Array.from(new Set([...boundaries, ...extra])).sort(
-        (x, y) => x - y,
-      );
+      boundaries = Array.from(new Set([...boundaries, ...extra])).sort((x, y) => x - y);
   }
   return {
     boundaries,
@@ -273,16 +250,8 @@ function clusterSections(matrixObj, boundaries) {
       let sum = 0,
         count = 0,
         step = 4;
-      for (
-        let y = sections[i].start_frame;
-        y < sections[i].end_frame;
-        y += step
-      )
-        for (
-          let x = sections[j].start_frame;
-          x < sections[j].end_frame;
-          x += step
-        ) {
+      for (let y = sections[i].start_frame; y < sections[i].end_frame; y += step)
+        for (let x = sections[j].start_frame; x < sections[j].end_frame; x += step) {
           sum += data[y * n + x] || 0;
           count++;
         }
@@ -335,8 +304,7 @@ function labelSections(sections, clusters) {
   sections.forEach((section, idx) => {
     if (!section.section_label) {
       if (idx === sections.length - 1) section.section_label = 'outro';
-      else if (section.length < sections[0].length * 0.6)
-        section.section_label = 'bridge';
+      else if (section.length < sections[0].length * 0.6) section.section_label = 'bridge';
       else section.section_label = 'verse';
       section.section_variant = 1;
     }
@@ -359,8 +327,7 @@ function shouldMergeSections(a, b) {
   const aDur = (a.end_frame - a.start_frame) * FRAME_HOP_SECONDS;
   const bDur = (b.end_frame - b.start_frame) * FRAME_HOP_SECONDS;
   const short = aDur < MIN_SECTION_SECONDS || bDur < MIN_SECTION_SECONDS;
-  const sameLabel =
-    a.section_label && b.section_label && a.section_label === b.section_label;
+  const sameLabel = a.section_label && b.section_label && a.section_label === b.section_label;
   const gap = (b.start_frame - a.end_frame) * FRAME_HOP_SECONDS;
   return short || sameLabel || gap < 2;
 }
@@ -378,9 +345,7 @@ function attachSemanticSignatures(sections, clusters, linear) {
   return sections.map((s) => {
     const start = s.start_frame * FRAME_HOP_SECONDS;
     const end = s.end_frame * FRAME_HOP_SECONDS;
-    const slice = frames.filter(
-      (f) => f.timestamp >= start && f.timestamp < end,
-    );
+    const slice = frames.filter((f) => f.timestamp >= start && f.timestamp < end);
     const summary = summarizeFrames(slice || []);
     return {
       ...s,
@@ -404,10 +369,7 @@ function mergeSemanticSignatures(a = {}, b = {}) {
     total = durA + durB || 1;
   const w = (k) => ((a[k] || 0) * durA + (b[k] || 0) * durB) / total;
   return {
-    repetition_score: Math.max(
-      a.repetition_score || 0,
-      b.repetition_score || 0,
-    ),
+    repetition_score: Math.max(a.repetition_score || 0, b.repetition_score || 0),
     repetition_count: (a.repetition_count || 0) + (b.repetition_count || 0),
     avg_rms: w('avg_rms'),
     max_rms: Math.max(a.max_rms || 0, b.max_rms || 0),
@@ -466,8 +428,7 @@ async function analyzeStructure(linear, progressCallback = () => {}) {
   progressCallback(10);
   await new Promise((r) => setTimeout(r, 0));
   const chroma =
-    linear.chroma_frames?.map((f) => f.chroma || []) ||
-    extractChromaFromEvents(linear.events);
+    linear.chroma_frames?.map((f) => f.chroma || []) || extractChromaFromEvents(linear.events);
   const mfcc = linear.mfcc_frames?.map((f) => f.mfcc || []) || null;
   const rms = linear.chroma_frames?.map((f) => f.rms || 0) || [];
   const flux = linear.chroma_frames?.map((f) => f.flux || 0) || [];
@@ -480,11 +441,7 @@ async function analyzeStructure(linear, progressCallback = () => {}) {
   progressCallback(70);
   const clustering = clusterSections(matrixObj, snapped);
   const labeled = labelSections(clustering.sections, clustering.clusters);
-  const enriched = attachSemanticSignatures(
-    labeled,
-    clustering.clusters,
-    linear,
-  );
+  const enriched = attachSemanticSignatures(labeled, clustering.clusters, linear);
   const merged = mergeSemanticSections(enriched, linear);
   progressCallback(90);
   const structural_map = {

@@ -10,76 +10,133 @@ import tempfile
 from scipy.signal import butter, filtfilt
 from scipy.stats import mode
 
-# --- Enhanced Chord Templates (Major, Minor, 7ths, Extensions) ---
+# --- Enhanced Chord Templates with Psychoacoustic Weighting ---
 ROOTS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 TEMPLATES = []
 LABELS = []
 
-# Major triads
+# Major triads (with natural overtone series)
 for i in range(12):
     v = np.zeros(12)
-    v[i] = 1
-    v[(i + 4) % 12] = 1
-    v[(i + 7) % 12] = 1
+    v[i] = 1.0                    # Root (fundamental)
+    v[(i + 4) % 12] = 0.9         # Major 3rd (strong)
+    v[(i + 7) % 12] = 0.85        # Perfect 5th (strong)
+    v[(i + 11) % 12] = 0.25       # Major 7th (natural overtone)
     TEMPLATES.append(v)
     LABELS.append(ROOTS[i])
 
 # Minor triads
 for i in range(12):
     v = np.zeros(12)
-    v[i] = 1
-    v[(i + 3) % 12] = 1
-    v[(i + 7) % 12] = 1
+    v[i] = 1.0                    # Root
+    v[(i + 3) % 12] = 0.9         # Minor 3rd (strong)
+    v[(i + 7) % 12] = 0.85        # Perfect 5th
+    v[(i + 10) % 12] = 0.2        # Minor 7th (weak overtone)
     TEMPLATES.append(v)
     LABELS.append(ROOTS[i] + 'm')
 
-# Dominant 7ths
+# Dominant 7ths (very common in pop/rock)
 for i in range(12):
     v = np.zeros(12)
-    v[i] = 1
-    v[(i + 4) % 12] = 1
-    v[(i + 7) % 12] = 1
-    v[(i + 10) % 12] = 1
+    v[i] = 1.0                    # Root
+    v[(i + 4) % 12] = 0.85        # Major 3rd
+    v[(i + 7) % 12] = 0.8         # Perfect 5th
+    v[(i + 10) % 12] = 0.75       # Minor 7th (STRONG in dom7)
     TEMPLATES.append(v)
     LABELS.append(ROOTS[i] + '7')
 
-# Major 7ths
+# Major 7ths (jazz/sophisticated pop)
 for i in range(12):
     v = np.zeros(12)
-    v[i] = 1
-    v[(i + 4) % 12] = 1
-    v[(i + 7) % 12] = 1
-    v[(i + 11) % 12] = 1
+    v[i] = 1.0                    # Root
+    v[(i + 4) % 12] = 0.85        # Major 3rd
+    v[(i + 7) % 12] = 0.8         # Perfect 5th
+    v[(i + 11) % 12] = 0.7        # Major 7th (strong in maj7)
     TEMPLATES.append(v)
     LABELS.append(ROOTS[i] + 'maj7')
 
 # Minor 7ths
 for i in range(12):
     v = np.zeros(12)
-    v[i] = 1
-    v[(i + 3) % 12] = 1
-    v[(i + 7) % 12] = 1
-    v[(i + 10) % 12] = 1
+    v[i] = 1.0                    # Root
+    v[(i + 3) % 12] = 0.85        # Minor 3rd
+    v[(i + 7) % 12] = 0.8         # Perfect 5th
+    v[(i + 10) % 12] = 0.75       # Minor 7th
     TEMPLATES.append(v)
     LABELS.append(ROOTS[i] + 'm7')
 
-# Sus4 chords
+# Sus4 chords (common in rock)
 for i in range(12):
     v = np.zeros(12)
-    v[i] = 1
-    v[(i + 5) % 12] = 1
-    v[(i + 7) % 12] = 1
+    v[i] = 1.0                    # Root
+    v[(i + 5) % 12] = 0.9         # Perfect 4th (replaces 3rd)
+    v[(i + 7) % 12] = 0.85        # Perfect 5th
     TEMPLATES.append(v)
     LABELS.append(ROOTS[i] + 'sus4')
 
 TEMPLATE_MATRIX = np.array(TEMPLATES)  # (72, 12) - 12 major + 12 minor + 12 dom7 + 12 maj7 + 12 min7 + 12 sus4
 
 
-def estimate_chord_enhanced(chroma_frame: np.ndarray) -> tuple:
-    """Enhanced chord detection with confidence scores"""
+def detect_bass_note(y_perc: np.ndarray, sr: int, timestamp: float) -> int:
+    """
+    Extract actual bass frequency (40-200Hz) for proper inversion detection.
+    Returns pitch class (0-11) of the bass note.
+    """
+    # Get 200ms window around the beat for bass analysis
+    window_size = int(0.2 * sr)  # 200ms
+    center_sample = int(timestamp * sr)
+    start_sample = max(0, center_sample - window_size // 2)
+    end_sample = min(len(y_perc), center_sample + window_size // 2)
+    
+    if end_sample <= start_sample:
+        return None
+    
+    bass_window = y_perc[start_sample:end_sample]
+    
+    # Apply band-pass filter (40-200Hz - bass fundamental range)
+    b, a = butter(4, [40 / (sr / 2), 200 / (sr / 2)], btype='band')
+    bass_signal = filtfilt(b, a, bass_window)
+    
+    # Find dominant frequency using FFT
+    fft = np.fft.rfft(bass_signal)
+    freqs = np.fft.rfftfreq(len(bass_signal), 1/sr)
+    
+    # Only look at bass range
+    bass_range = (freqs >= 40) & (freqs <= 200)
+    if not np.any(bass_range):
+        return None
+    
+    bass_fft = np.abs(fft[bass_range])
+    bass_freqs = freqs[bass_range]
+    
+    if len(bass_fft) == 0:
+        return None
+    
+    # Find peak with minimum threshold
+    peak_idx = np.argmax(bass_fft)
+    peak_magnitude = bass_fft[peak_idx]
+    
+    # Threshold: bass must be 30% of max energy
+    if peak_magnitude < 0.3 * np.max(bass_fft):
+        return None
+    
+    peak_freq = bass_freqs[peak_idx]
+    
+    # Convert to MIDI note and then pitch class
+    if peak_freq < 30:  # Too low to be musical
+        return None
+    
+    midi_note = 12 * np.log2(peak_freq / 440.0) + 69
+    pitch_class = int(round(midi_note)) % 12
+    
+    return pitch_class
+
+
+def estimate_chord_enhanced(chroma_frame: np.ndarray, bass_pitch_class: int = None) -> tuple:
+    """Enhanced chord detection with confidence scores and bass note"""
     norm = np.linalg.norm(chroma_frame)
     if norm == 0:
-        return 'N', 0.0, 'unknown'
+        return 'N', 0.0, 'unknown', None
     
     cf = chroma_frame / norm
     scores = TEMPLATE_MATRIX @ cf
@@ -88,6 +145,29 @@ def estimate_chord_enhanced(chroma_frame: np.ndarray) -> tuple:
     best_idx = int(np.argmax(scores))
     best_score = float(scores[best_idx])
     best_label = LABELS[best_idx]
+    
+    # Extract root pitch class from chord label
+    root_map = {'C': 0, 'C#': 1, 'D': 2, 'D#': 3, 'E': 4, 'F': 5, 
+                'F#': 6, 'G': 7, 'G#': 8, 'A': 9, 'A#': 10, 'B': 11}
+    root_str = best_label.split('m')[0].split('7')[0].split('sus')[0]
+    root_pitch_class = root_map.get(root_str, 0)
+    
+    # Determine inversion using actual bass note
+    inversion = 0
+    if bass_pitch_class is not None and bass_pitch_class != root_pitch_class:
+        # Calculate interval from root to bass
+        interval = (bass_pitch_class - root_pitch_class) % 12
+        
+        # Map interval to inversion
+        # Root position: bass = root (0)
+        # 1st inversion: bass = 3rd (3 or 4 semitones)
+        # 2nd inversion: bass = 5th (7 semitones)
+        if interval in [3, 4]:  # Minor or major 3rd
+            inversion = 1
+        elif interval == 7:  # Perfect 5th
+            inversion = 2
+        elif interval in [10, 11]:  # Minor or major 7th
+            inversion = 3
     
     # Normalize confidence (0-1)
     confidence = min(1.0, max(0.0, best_score))
@@ -106,7 +186,7 @@ def estimate_chord_enhanced(chroma_frame: np.ndarray) -> tuple:
     else:
         quality = 'major'
     
-    return best_label, confidence, quality
+    return best_label, confidence, quality, inversion
 
 
 def detect_key(chroma: np.ndarray) -> tuple:
@@ -235,39 +315,76 @@ def detect_downbeats(y_perc: np.ndarray, sr: int, beat_times: np.ndarray, time_s
 
 
 def detect_drums(y_perc: np.ndarray, sr: int, beat_times: np.ndarray):
-    """Enhanced drum detection with confidence"""
-    # Kick <100Hz
-    bk, ak = butter(4, 100 / (sr / 2), btype='low')
+    """Enhanced drum detection with proper frequency bands"""
+    
+    # KICK: 40-150Hz (bass drum fundamental + low harmonics)
+    bk, ak = butter(4, [40 / (sr / 2), 150 / (sr / 2)], btype='band')
     kick_sig = filtfilt(bk, ak, y_perc)
+    
+    # SNARE: Two-band approach (body + crack)
+    # Body: 150-400Hz (fundamental resonance)
+    bs_low, as_low = butter(4, [150 / (sr / 2), 400 / (sr / 2)], btype='band')
+    snare_body = filtfilt(bs_low, as_low, y_perc)
+    
+    # Crack: 2-6kHz (snare wires rattle)
+    bs_high, as_high = butter(4, [2000 / (sr / 2), 6000 / (sr / 2)], btype='band')
+    snare_crack = filtfilt(bs_high, as_high, y_perc)
+    
+    # Blend snare components (body is primary)
+    snare_sig = snare_body + snare_crack * 0.5
+    
+    # Adaptive onset detection
     kick_onsets = librosa.onset.onset_detect(
-        y=kick_sig, sr=sr, units='time', delta=0.1
+        y=kick_sig, 
+        sr=sr, 
+        units='time',
+        delta=0.05,  # Stricter threshold
+        pre_max=3,   # Adaptive peak picking
+        post_max=3,
+        pre_avg=3,
+        post_avg=3,
+        wait=int(0.1 * sr / 512)  # Min 100ms between kicks
     )
     
-    # Snare 200-500Hz
-    bs, as_ = butter(4, [200 / (sr / 2), 500 / (sr / 2)], btype='band')
-    snare_sig = filtfilt(bs, as_, y_perc)
     snare_onsets = librosa.onset.onset_detect(
-        y=snare_sig, sr=sr, units='time', delta=0.1
+        y=snare_sig,
+        sr=sr,
+        units='time',
+        delta=0.1,   # Snares have sharper transients
+        pre_max=3,
+        post_max=3,
+        pre_avg=3,
+        post_avg=3,
+        wait=int(0.15 * sr / 512)  # Min 150ms between snares
     )
     
     kick_set = np.array(kick_onsets)
     snare_set = np.array(snare_onsets)
-    tol = 0.05
+    tol = 0.05  # 50ms tolerance
     drum_grid = []
     
     for i, t in enumerate(beat_times):
         has_kick = len(kick_set) > 0 and np.min(np.abs(kick_set - t)) < tol
         has_snare = len(snare_set) > 0 and np.min(np.abs(snare_set - t)) < tol
         
-        # Calculate confidence based on proximity
+        # Calculate confidence based on proximity and energy
         kick_conf = 0.0
         snare_conf = 0.0
+        
         if has_kick:
             min_dist = np.min(np.abs(kick_set - t))
-            kick_conf = max(0.0, 1.0 - (min_dist / tol))
+            # Get energy at this point
+            sample_idx = int(t * sr)
+            if sample_idx < len(kick_sig):
+                energy = np.abs(kick_sig[max(0, sample_idx-512):sample_idx+512]).mean()
+                kick_conf = max(0.0, (1.0 - (min_dist / tol)) * min(1.0, energy * 10))
+        
         if has_snare:
             min_dist = np.min(np.abs(snare_set - t))
-            snare_conf = max(0.0, 1.0 - (min_dist / tol))
+            sample_idx = int(t * sr)
+            if sample_idx < len(snare_sig):
+                energy = np.abs(snare_sig[max(0, sample_idx-512):sample_idx+512]).mean()
+                snare_conf = max(0.0, (1.0 - (min_dist / tol)) * min(1.0, energy * 10))
         
         drums = []
         if has_kick:
@@ -462,7 +579,15 @@ def analyze(file_path: str):
     try:
         # Stage 1: Loading
         print(json.dumps({'status': 'progress', 'value': 5, 'stage': 'loading'}), flush=True)
-        y, sr = librosa.load(file_path, sr=22050, mono=True)
+        try:
+            y, sr = librosa.load(file_path, sr=22050, mono=True)
+        except Exception as load_error:
+            # Provide more specific error message for audio format issues
+            error_msg = f"Failed to load audio file: {str(load_error)}"
+            if "format" in str(load_error).lower() or "ffmpeg" in str(load_error).lower():
+                error_msg += ". This may be due to unsupported audio format or missing ffmpeg. Try converting to WAV format."
+            print(json.dumps({'error': error_msg}), flush=True)
+            return
         duration = float(librosa.get_duration(y=y, sr=sr))
         print(json.dumps({'status': 'progress', 'value': 10, 'stage': 'loaded'}), flush=True)
 
@@ -537,28 +662,29 @@ def analyze(file_path: str):
         for i, chroma_frame in enumerate(beat_aligned_chroma):
             if i >= len(beat_times):
                 break
-            chord, confidence, quality = estimate_chord_enhanced(chroma_frame)
+            
+            # Detect bass note for this beat
+            bass_pitch_class = detect_bass_note(y_perc, sr, beat_times[i])
+            
+            # Enhanced chord detection with bass
+            chord, confidence, quality, inversion = estimate_chord_enhanced(
+                chroma_frame, 
+                bass_pitch_class
+            )
+            
             if chord == last_label and confidence < 0.7:
                 continue
             last_label = chord
-            
-            # Determine inversion (simplified - check if bass note differs)
-            bass_note_idx = int(np.argmax(chroma_frame))
-            root_note_idx = ROOTS.index(chord[0]) if chord[0] in ROOTS else 0
-            inversion = 0
-            if bass_note_idx != root_note_idx:
-                inversion = (bass_note_idx - root_note_idx) % 12
-                if inversion > 6:
-                    inversion = 12 - inversion
             
             raw_events.append({
                 'timestamp': float(beat_times[i]),
                 'event_type': 'chord_candidate',
                 'chord': chord,
                 'chord_quality': quality,
-                'chord_inversion': int(inversion),
+                'chord_inversion': int(inversion) if inversion is not None else 0,
+                'bass_pitch_class': int(bass_pitch_class) if bass_pitch_class is not None else None,
                 'confidence': float(confidence),
-                'source': 'PY_Enhanced'
+                'source': 'PY_Enhanced_Bass'
             })
         
         # Stage 12: Drum Detection

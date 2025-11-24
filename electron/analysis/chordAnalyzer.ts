@@ -33,20 +33,19 @@ export class ChordAnalyzer {
     beatTimestamps: number[],
     // Librosa hop_length=512 @ sr=22050 -> ~0.0232s per frame
     frameHop = 0.0232,
-    windowShift = 0, // Optional manual shift in seconds (-0.05 to +0.05)
+    windowShift = 0, // -0.5 to +0.5 (relative position within beat, 0 = centered on sustain)
   ) {
     if (!chromaFrames || !chromaFrames.length || !beatTimestamps) return [];
     const beats: number[][] = [];
     const frameIndexForTime = (t: number) => Math.round(t / frameHop);
     
-    // Gaussian window function: emphasize post-attack sustain (30%-80% of beat)
-    // Shifted from center 50% (25%-75%) to post-attack 55% (30%-80%)
+    // Gaussian window function: emphasize post-attack sustain
     const gaussianWeight = (position: number, total: number) => {
       if (total <= 1) return 1.0;
-      // New center: 55% of the way through (was 50%)
-      // This captures the stable core after the attack transient
-      const center = (total - 1) * 0.55; // 30% start + (80% - 30%) / 2 = 55%
-      const sigma = total * 0.15; // Narrower window focused on 30%-80% range
+      // Center on sustain region (55% through beat = 30-80% range)
+      // windowShift adjusts center: -0.5 shifts earlier, +0.5 shifts later
+      const center = (total - 1) * (0.55 + windowShift * 0.25); // windowShift adjusts center
+      const sigma = total * 0.15; // Covers ~50% of beat (30-80% region)
       const x = position - center;
       return Math.exp(-(x * x) / (2 * sigma * sigma));
     };
@@ -56,12 +55,20 @@ export class ChordAnalyzer {
       const beatEnd =
         i + 1 < beatTimestamps.length ? beatTimestamps[i + 1] : beatStart + 0.5;
       
-      // Apply window shift: shift the analysis window to avoid attack transients
-      const shiftedStart = beatStart + windowShift;
-      const shiftedEnd = beatEnd + windowShift;
+      const beatDuration = beatEnd - beatStart;
       
-      const startFrame = frameIndexForTime(shiftedStart);
-      const endFrame = frameIndexForTime(shiftedEnd);
+      // Define analysis window within beat boundaries
+      // windowShift moves the CENTER of the gaussian, not the window itself
+      // Default (windowShift=0): analyze 30-80% of beat (post-attack sustain)
+      // windowShift=-0.5: shift earlier (analyze attack more)
+      // windowShift=+0.5: shift later (analyze decay/release)
+      const analysisStart = beatStart + (beatDuration * 0.3);
+      const analysisEnd = beatStart + (beatDuration * 0.8);
+      
+      // CRITICAL: Window stays within beat, shift only affects gaussian center
+      const startFrame = frameIndexForTime(analysisStart);
+      const endFrame = frameIndexForTime(analysisEnd);
+      
       const avg = new Array(12).fill(0);
       let totalWeight = 0;
       
@@ -526,20 +533,14 @@ export class ChordAnalyzer {
     }
     
     // Compute probability rows with per-beat key masks
-    // Safety Valve: Disable key bias if confidence is too low (< 0.3)
+    // Apply key bias for all frames - it always helps guide detection
     const probRowsTemplate: ChordProbRow[] = [];
     for (let i = 0; i < beatChroma.length; i++) {
       const keyMask = beatKeyMasks[i];
       
-      // First, compute baseline confidence without key mask
-      const baselineRow = this.getChordProbabilities(
-        [beatChroma[i]],
-        { temperature: temperature },
-      );
-      const baselineConfidence = Math.max(...baselineRow[0].map((x) => x.score));
-      
-      // Safety Valve: If confidence < 0.3, disable key bias to avoid forcing incorrect chords
-      const shouldApplyKeyMask = keyMask && baselineConfidence >= 0.3;
+      // REMOVED: No baseline confidence check
+      // Key bias should ALWAYS be applied when available
+      const shouldApplyKeyMask = keyMask !== null;
       
       const row = this.getChordProbabilities(
         [beatChroma[i]],

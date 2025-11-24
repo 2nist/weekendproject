@@ -1,4 +1,5 @@
 const easymidi = require('easymidi');
+const logger = require('./analysis/logger');
 
 const midiListener = {
   init: (cb) => {
@@ -7,11 +8,11 @@ const midiListener = {
       const input = new easymidi.Input(inputs[0]);
       input.on('message', (msg) => {
         const { _type, channel, note, velocity, controller, value } = msg;
-        console.log(msg);
+        logger.debug(msg);
         cb({ _type, channel, note, velocity, controller, value });
       });
     } else {
-      console.log('No MIDI input devices found.');
+      logger.warn('No MIDI input devices found.');
     }
   },
   openPort: (port) => {

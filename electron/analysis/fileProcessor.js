@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const logger = require('./logger');
 
 // TODO: Integrate fluent-ffmpeg for format conversion
 // For now, basic file handling
@@ -83,7 +84,7 @@ async function prepareAudioFile(filePath) {
     return tempPath;
   } catch (error) {
     throw new Error(
-      `Failed to convert audio file: ${error.message}. Please provide WAV files or install ffmpeg.`
+      `Failed to convert audio file: ${error.message}. Please provide WAV files or install ffmpeg.`,
     );
   }
 }
@@ -97,7 +98,7 @@ function cleanupTempFile(filePath) {
       fs.unlinkSync(filePath);
     }
   } catch (error) {
-    console.warn('Failed to cleanup temp file:', error);
+    logger.warn('Failed to cleanup temp file:', error);
   }
 }
 
@@ -116,7 +117,7 @@ function isSupportedFormat(filePath) {
  */
 async function convertToWav(inputPath, outputPath) {
   const ext = path.extname(inputPath).toLowerCase();
-  
+
   // If already WAV, just copy
   if (ext === '.wav') {
     fs.copyFileSync(inputPath, outputPath);
@@ -127,7 +128,7 @@ async function convertToWav(inputPath, outputPath) {
   try {
     const ffmpeg = require('fluent-ffmpeg');
     const ffmpegPath = require('ffmpeg-static');
-    
+
     if (ffmpegPath) {
       ffmpeg.setFfmpegPath(ffmpegPath);
     }
@@ -149,8 +150,7 @@ async function convertToWav(inputPath, outputPath) {
   } catch (error) {
     // If ffmpeg not available, throw helpful error
     throw new Error(
-      'FFmpeg not available. Please install ffmpeg or provide WAV files directly. ' +
-      error.message
+      'FFmpeg not available. Please install ffmpeg or provide WAV files directly. ' + error.message,
     );
   }
 }
@@ -164,4 +164,3 @@ module.exports = {
   prepareAudioFile,
   cleanupTempFile,
 };
-

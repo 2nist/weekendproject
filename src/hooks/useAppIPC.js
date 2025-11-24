@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import logger from '@/lib/logger';
 import { useBlocks } from '../contexts/BlocksContext';
 
 // Async command sender that never blocks the UI thread.
@@ -46,9 +47,9 @@ export function useStatus() {
     // request initial status ONCE on mount
     try {
       window.ipc.send('UI:REQUEST_STATUS');
-      console.log('[useStatus] Requested initial status');
+      logger.debug('[useStatus] Requested initial status');
     } catch (e) {
-      console.warn('[useStatus] Failed to request initial status:', e);
+      logger.warn('[useStatus] Failed to request initial status:', e);
     }
 
     return () => {

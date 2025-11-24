@@ -11,6 +11,7 @@ import SandboxView from './views/SandboxView';
 import AnalysisTuner from './components/tools/AnalysisTuner';
 // BlocksProvider is provided at the app root in `main.jsx` to avoid re-mounts during HMR
 import { useEditor } from './contexts/EditorContext';
+import logger from './lib/logger';
 
 function App() {
   const navigate = useNavigate();
@@ -21,7 +22,7 @@ function App() {
   const [showAnalysisTuner, setShowAnalysisTuner] = React.useState(false);
 
   React.useEffect(() => {
-    console.log('[App] Mounted.');
+    logger.debug('[App] Mounted.');
   }, []);
 
   React.useEffect(() => {
@@ -33,7 +34,7 @@ function App() {
   React.useEffect(() => {
     const onOpenSandbox = async (e) => {
       const detail = e?.detail || {};
-      console.log('[App] OPEN_SANDBOX event received:', detail);
+      logger.debug('[App] OPEN_SANDBOX event received:', detail);
 
       let analysisData = null;
 
@@ -43,10 +44,18 @@ function App() {
           const res = await globalThis.ipc.invoke('ANALYSIS:GET_BY_ID', detail.analysisId);
           if (res?.success && res.analysis) {
             analysisData = res.analysis;
-            console.log('[App] Loaded analysis by ID:', analysisData?.id);
+            logger.debug('[App] Loaded analysis by ID:', analysisData?.id);
+          } else {
+            logger.warn('[App] ANALYSIS:GET_BY_ID failed:', res?.error || 'No analysis found');
           }
         } catch (err) {
-          console.error('[App] Failed to fetch analysis by ID:', err);
+          logger.error('[App] Failed to fetch analysis by ID:', err);
+          // Show user-friendly error but don't block navigation
+          if (typeof window !== 'undefined' && window.alert) {
+            window.alert(
+              'Failed to load analysis data. The sandbox will open with limited functionality.',
+            );
+          }
         }
       }
 
@@ -57,16 +66,22 @@ function App() {
           const res = await globalThis.ipc.invoke('ANALYSIS:GET_RESULT', detail.fileHash);
           if (res?.success && res.analysis) {
             analysisData = res.analysis;
-            console.log('[App] Loaded analysis by fileHash:', analysisData?.id);
+            logger.debug('[App] Loaded analysis by fileHash:', analysisData?.id);
           } else if (res?.analysis) {
             // Handle case where response doesn't have success flag
             analysisData = res.analysis;
             console.log('[App] Loaded analysis (no success flag):', analysisData?.id);
           } else {
-            console.warn('[App] ANALYSIS:GET_RESULT returned no analysis:', res);
+            logger.warn('[App] ANALYSIS:GET_RESULT returned no analysis:', res);
           }
         } catch (err) {
-          console.error('[App] Failed to fetch analysis by fileHash:', err);
+          logger.error('[App] Failed to fetch analysis by fileHash:', err);
+          // Show user-friendly error but don't block navigation
+          if (typeof window !== 'undefined' && window.alert) {
+            window.alert(
+              'Failed to load analysis data. The sandbox will open with limited functionality.',
+            );
+          }
         }
       }
 
@@ -76,14 +91,14 @@ function App() {
           fileHash: detail.fileHash,
           file_hash: detail.fileHash,
         };
-        console.log('[App] Created minimal data object with fileHash:', detail.fileHash);
+        logger.debug('[App] Created minimal data object with fileHash:', detail.fileHash);
       }
 
       // Set context and update editor
       if (analysisData) {
         setSandboxContext(analysisData);
         if (editor?.actions?.updateSongData) {
-          console.log('[App] Updating EditorContext with analysis data');
+          logger.debug('[App] Updating EditorContext with analysis data');
           editor.actions.updateSongData(analysisData);
         }
         // Store fileHash globally for other components
@@ -92,7 +107,7 @@ function App() {
           globalThis.__currentFileHash = analysisData.fileHash || analysisData.file_hash;
         }
       } else {
-        console.warn('[App] No analysis data available for sandbox');
+        logger.warn('[App] No analysis data available for sandbox');
         setSandboxContext(detail || null);
       }
 
@@ -108,10 +123,13 @@ function App() {
       try {
         const res = await globalThis.electronAPI.invoke('ANALYSIS:LOAD_TO_ARCHITECT', hash);
         if (res.success && res.blocks) {
-          console.log('Analysis reloaded after tuner update:', res.blocks.length, 'blocks');
+          logger.debug('Analysis reloaded after tuner update:', res.blocks.length, 'blocks');
+        } else {
+          logger.warn('Tuner update failed:', res?.error || 'Unknown error');
         }
       } catch (err) {
-        console.error('Tuner update failed', err);
+        logger.error('Tuner update failed:', err);
+        // Don't show alert for tuner updates as they're background operations
       }
     }
   }, []);

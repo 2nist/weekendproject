@@ -1,5 +1,6 @@
 let trackMap = new Map();
 let db;
+const logger = require('./analysis/logger');
 
 const trackResolver = {
   init: (database) => {
@@ -12,7 +13,13 @@ const trackResolver = {
       const result = stmt.get('track_list');
       stmt.free();
 
-      if (result && result.values && result.values.length > 0 && result.values[0] && result.values[0].length > 0) {
+      if (
+        result &&
+        result.values &&
+        result.values.length > 0 &&
+        result.values[0] &&
+        result.values[0].length > 0
+      ) {
         const trackListValue = result.values[0][0];
         if (trackListValue && typeof trackListValue === 'string') {
           const trackList = trackListValue.split(',');
@@ -24,7 +31,7 @@ const trackResolver = {
         }
       }
     } catch (error) {
-      console.error('Error updating track map:', error);
+      logger.error('Error updating track map:', error);
     }
   },
   startMockUpdates: () => {
@@ -37,13 +44,13 @@ const trackResolver = {
       // Safely log - handle broken pipe errors
       try {
         const trackMapObj = Object.fromEntries(trackMap);
-        console.log('Track map updated:', trackMapObj);
+        logger.debug('Track map updated:', trackMapObj);
       } catch (error) {
         // Silently ignore broken pipe errors (EPIPE)
         // This can happen when stdout is redirected or closed
         if (error.code !== 'EPIPE') {
           // Only log if it's not a broken pipe error
-          console.error('Error logging track map:', error.message);
+          logger.error('Error logging track map:', error.message);
         }
       }
     }, 5000);

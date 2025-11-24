@@ -3,6 +3,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 const db = require('../db');
 const { app } = require('electron');
+const logger = require('../analysis/logger');
 
 type ImportPayload = {
   audioPath?: string;
@@ -46,14 +47,14 @@ function copyFileToLibrary(
   }
   const destFilename = `${uuid}-${Date.now()}-${baseName}`;
   const destPath = path.join(destDir, destFilename);
-  
+
   // Ensure source file exists
   if (!fs.existsSync(srcPath)) {
     throw new Error(`Source file not found: ${srcPath}`);
   }
-  
+
   fs.copyFileSync(srcPath, destPath);
-  console.log(`[Library] Copied ${destSubDir} file: ${srcPath} -> ${destPath}`);
+  logger.info(`[Library] Copied ${destSubDir} file: ${srcPath} -> ${destPath}`);
   return destPath;
 }
 
@@ -61,11 +62,9 @@ function copyFileToLibrary(
  * Export analysis data to Isophonics .lab format
  * Format: "Start End Label" (space-separated, one per line)
  */
-function exportToLabFormat(
-  segments: Array<{ start: number; end: number; label: string }>
-): string {
+function exportToLabFormat(segments: Array<{ start: number; end: number; label: string }>): string {
   return segments
-    .map(seg => `${seg.start.toFixed(3)} ${seg.end.toFixed(3)} ${seg.label}`)
+    .map((seg) => `${seg.start.toFixed(3)} ${seg.end.toFixed(3)} ${seg.label}`)
     .join('\n');
 }
 
@@ -76,16 +75,18 @@ function convertSectionsToLab(structuralMap: any): string {
   if (!structuralMap?.sections || !Array.isArray(structuralMap.sections)) {
     return '';
   }
-  
+
   const segments = structuralMap.sections
-    .filter((s: any) => s.time_range?.start_time !== undefined && s.time_range?.end_time !== undefined)
+    .filter(
+      (s: any) => s.time_range?.start_time !== undefined && s.time_range?.end_time !== undefined,
+    )
     .map((s: any) => ({
       start: s.time_range.start_time,
       end: s.time_range.end_time,
       label: s.section_label || s.label || 'unknown',
     }))
     .sort((a, b) => a.start - b.start);
-  
+
   return exportToLabFormat(segments);
 }
 
@@ -96,14 +97,12 @@ function convertChordsToLab(linearAnalysis: any): string {
   if (!linearAnalysis?.events || !Array.isArray(linearAnalysis.events)) {
     return '';
   }
-  
+
   // Filter chord events and sort by timestamp
   const chordEvents = linearAnalysis.events
     .filter((e: any) => {
-      const isChord = e.event_type === 'chord' || 
-                     e.event_type === 'chord_candidate' ||
-                     e._chord_label ||
-                     e.chord;
+      const isChord =
+        e.event_type === 'chord' || e.event_type === 'chord_candidate' || e._chord_label || e.chord;
       return isChord && e.timestamp !== undefined;
     })
     .map((e: any) => {
@@ -116,16 +115,17 @@ function convertChordsToLab(linearAnalysis: any): string {
       };
     })
     .sort((a, b) => a.timestamp - b.timestamp);
-  
+
   if (chordEvents.length === 0) {
     return '';
   }
-  
+
   // Convert to segments (each chord lasts until the next one)
   const segments: Array<{ start: number; end: number; label: string }> = [];
-  const duration = linearAnalysis.metadata?.duration_seconds || 
-                   (chordEvents.length > 0 ? chordEvents[chordEvents.length - 1].timestamp + 1 : 0);
-  
+  const duration =
+    linearAnalysis.metadata?.duration_seconds ||
+    (chordEvents.length > 0 ? chordEvents[chordEvents.length - 1].timestamp + 1 : 0);
+
   for (let i = 0; i < chordEvents.length; i++) {
     const current = chordEvents[i];
     const next = chordEvents[i + 1];
@@ -135,7 +135,7 @@ function convertChordsToLab(linearAnalysis: any): string {
       label: current.label,
     });
   }
-  
+
   return exportToLabFormat(segments);
 }
 
@@ -143,44 +143,46 @@ function convertChordsToLab(linearAnalysis: any): string {
  * Promote a project's corrected analysis to calibration benchmark
  * Exports .lab files and copies audio to test/user/ folder
  */
-export async function promoteToBenchmark(projectId: string): Promise<{ success: boolean; error?: string }> {
+export async function promoteToBenchmark(
+  projectId: string,
+): Promise<{ success: boolean; error?: string }> {
   try {
     const database = db.getDb();
     if (!database) {
       throw new Error('Database not initialized');
     }
-    
+
     // Get project from DB
     const projectStmt = database.prepare('SELECT * FROM Projects WHERE id = ?');
     const project = projectStmt.get(projectId);
     projectStmt.free();
-    
+
     if (!project) {
       throw new Error(`Project ${projectId} not found`);
     }
-    
+
     // Get analysis for this project
     const analysisId = project.analysis_id;
     if (!analysisId) {
       throw new Error('Project has no analysis');
     }
-    
+
     const analysis = db.getAnalysisById(analysisId);
     if (!analysis) {
       throw new Error('Analysis not found');
     }
-    
+
     // Ensure user test directory exists
     // Use __dirname to find the electron directory, then navigate to test/user
     const electronDir = path.resolve(__dirname, '..');
     const testUserDir = path.join(electronDir, 'analysis', 'test', 'user');
-    
+
     if (!fs.existsSync(testUserDir)) {
       fs.mkdirSync(testUserDir, { recursive: true });
     }
-    
+
     const testDir = testUserDir;
-    
+
     // Generate safe filename from project title
     const safeTitle = (project.title || 'untitled')
       .replace(/[^a-zA-Z0-9]/g, '_')
@@ -188,26 +190,26 @@ export async function promoteToBenchmark(projectId: string): Promise<{ success: 
       .substring(0, 50);
     const timestamp = Date.now();
     const baseName = `${safeTitle}_${timestamp}`;
-    
+
     // Copy audio file
     if (!analysis.file_path || !fs.existsSync(analysis.file_path)) {
       throw new Error('Audio file not found');
     }
-    
+
     const audioExt = path.extname(analysis.file_path);
     const audioDest = path.join(testDir, `${baseName}${audioExt}`);
     fs.copyFileSync(analysis.file_path, audioDest);
-    
+
     // Export sections to .lab
     const sectionsLab = convertSectionsToLab(analysis.structural_map);
     const sectionsLabPath = path.join(testDir, `${baseName}.lab`);
     fs.writeFileSync(sectionsLabPath, sectionsLab, 'utf8');
-    
+
     // Export chords to .lab
     const chordsLab = convertChordsToLab(analysis.linear_analysis);
     const chordsLabPath = path.join(testDir, `${baseName}_chord.lab`);
     fs.writeFileSync(chordsLabPath, chordsLab, 'utf8');
-    
+
     // Store metadata in a JSON file for reference
     const metadata = {
       projectId,
@@ -216,19 +218,20 @@ export async function promoteToBenchmark(projectId: string): Promise<{ success: 
       audioPath: audioDest,
       sectionLabPath: sectionsLabPath,
       chordLabPath: chordsLabPath,
-      referenceKey: analysis.harmonic_context?.global_key?.primary_key || 
-                    analysis.linear_analysis?.metadata?.detected_key || 
-                    'unknown',
+      referenceKey:
+        analysis.harmonic_context?.global_key?.primary_key ||
+        analysis.linear_analysis?.metadata?.detected_key ||
+        'unknown',
     };
     const metadataPath = path.join(testDir, `${baseName}_metadata.json`);
     fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
-    
+
     return {
       success: true,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error('[promoteToBenchmark] Error:', errorMsg);
+    logger.error('[promoteToBenchmark] Error:', errorMsg);
     return {
       success: false,
       error: errorMsg,
@@ -238,9 +241,7 @@ export async function promoteToBenchmark(projectId: string): Promise<{ success: 
 
 export async function importSong(userDataPath: string, payload: ImportPayload) {
   const uuid = randomUUID();
-  const title =
-    payload.title ||
-    path.basename(payload.audioPath || payload.midiPath || 'untitled');
+  const title = payload.title || path.basename(payload.audioPath || payload.midiPath || 'untitled');
   const artist = payload.artist || '';
   const bpm = payload.bpm || null;
   const key_signature = payload.key || null;
@@ -252,35 +253,25 @@ export async function importSong(userDataPath: string, payload: ImportPayload) {
   let lyrics_path: string | null = null;
   try {
     if (payload.audioPath) {
-      console.log(`[importSong] Copying audio file: ${payload.audioPath}`);
-      audio_path = copyFileToLibrary(
-        userDataPath,
-        payload.audioPath,
-        'audio',
-        uuid,
-      );
-      console.log(`[importSong] Audio file copied to: ${audio_path}`);
+      logger.info(`[importSong] Copying audio file: ${payload.audioPath}`);
+      audio_path = copyFileToLibrary(userDataPath, payload.audioPath, 'audio', uuid);
+      logger.debug(`[importSong] Audio file copied to: ${audio_path}`);
     }
     if (payload.midiPath) {
-      console.log(`[importSong] Copying MIDI file: ${payload.midiPath}`);
-      midi_path = copyFileToLibrary(
-        userDataPath,
-        payload.midiPath,
-        'midi',
-        uuid,
-      );
-      console.log(`[importSong] MIDI file copied to: ${midi_path}`);
+      logger.info(`[importSong] Copying MIDI file: ${payload.midiPath}`);
+      midi_path = copyFileToLibrary(userDataPath, payload.midiPath, 'midi', uuid);
+      logger.debug(`[importSong] MIDI file copied to: ${midi_path}`);
     }
     if (payload.lyricsPath) {
       // Lyrics path is already copied in batch import, just store it
       lyrics_path = payload.lyricsPath;
     }
-    
+
     // Store lyrics path in metadata if provided
     if (lyrics_path) {
       metadata.lyrics_path = lyrics_path;
     }
-    
+
     const id = db.saveProject({
       uuid,
       title,
@@ -306,11 +297,7 @@ export async function importSong(userDataPath: string, payload: ImportPayload) {
   }
 }
 
-export function saveAnalysisForProject(
-  projectId: number,
-  linearAnalysis: any,
-  app?: any,
-) {
+export function saveAnalysisForProject(projectId: number, linearAnalysis: any, app?: any) {
   // Save analysis JSON into analysis cache and attach analysis to project
   try {
     // Save the analysis using db.saveAnalysis, which returns an ID
@@ -330,10 +317,7 @@ export function saveAnalysisForProject(
       try {
         const database = db.getDb();
         if (database && typeof database.run === 'function') {
-          database.run('UPDATE Projects SET analysis_id = ? WHERE id = ?', [
-            analysisId,
-            projectId,
-          ]);
+          database.run('UPDATE Projects SET analysis_id = ? WHERE id = ?', [analysisId, projectId]);
         }
       } catch (e) {
         // ignore update error
@@ -345,10 +329,7 @@ export function saveAnalysisForProject(
   }
 }
 
-export async function parseMidiAndSaveForProject(
-  projectId: number,
-  midiPath: string,
-) {
+export async function parseMidiAndSaveForProject(projectId: number, midiPath: string) {
   try {
     // Dynamically require the parser so it uses TS version in dev when loaded
     let parser: any = null;

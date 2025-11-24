@@ -5,6 +5,7 @@
 
 import { useEditor } from '@/contexts/EditorContext';
 import { useCallback } from 'react';
+import logger from '@/lib/logger';
 
 /**
  * Hook to execute menu actions
@@ -21,7 +22,7 @@ export function useMenuActions() {
    */
   const executeAction = useCallback(
     (actionId: string, targetId: string, data?: any) => {
-      console.log('[useMenuActions] Executing action:', { actionId, targetId, data });
+      logger.debug('[useMenuActions] Executing action:', { actionId, targetId, data });
 
       switch (actionId) {
         // Beat Actions
@@ -37,9 +38,9 @@ export function useMenuActions() {
             if (!state.isPlaying && actions.togglePlayback) {
               actions.togglePlayback();
             }
-            console.log('[useMenuActions] Audition beat at:', timestamp);
+            logger.debug('[useMenuActions] Audition beat at:', timestamp);
           } else {
-            console.warn('[useMenuActions] beat.play requires timestamp in data');
+            logger.warn('[useMenuActions] beat.play requires timestamp in data');
           }
           break;
         }
@@ -48,7 +49,7 @@ export function useMenuActions() {
           // Edit Chord: Select beat to open Inspector
           if (actions.selectObject) {
             actions.selectObject('beat', targetId, data);
-            console.log('[useMenuActions] Selected beat for editing:', targetId);
+            logger.debug('[useMenuActions] Selected beat for editing:', targetId);
           }
           break;
         }
@@ -58,7 +59,7 @@ export function useMenuActions() {
           if (actions.updateBeat && data) {
             const currentKick = data.drums?.hasKick || false;
             actions.updateBeat(targetId, { hasKick: !currentKick });
-            console.log('[useMenuActions] Toggled kick:', !currentKick);
+            logger.debug('[useMenuActions] Toggled kick:', !currentKick);
           }
           break;
         }
@@ -68,7 +69,7 @@ export function useMenuActions() {
           if (actions.updateBeat && data) {
             const currentSnare = data.drums?.hasSnare || false;
             actions.updateBeat(targetId, { hasSnare: !currentSnare });
-            console.log('[useMenuActions] Toggled snare:', !currentSnare);
+            logger.debug('[useMenuActions] Toggled snare:', !currentSnare);
           }
           break;
         }
@@ -78,7 +79,7 @@ export function useMenuActions() {
           // Rename: Select section to open Inspector
           if (actions.selectObject) {
             actions.selectObject('section', targetId, data);
-            console.log('[useMenuActions] Selected section for renaming:', targetId);
+            logger.debug('[useMenuActions] Selected section for renaming:', targetId);
           }
           break;
         }
@@ -87,14 +88,14 @@ export function useMenuActions() {
           // Change Color: Select section (Inspector will handle color picker)
           if (actions.selectObject) {
             actions.selectObject('section', targetId, data);
-            console.log('[useMenuActions] Selected section for color change:', targetId);
+            logger.debug('[useMenuActions] Selected section for color change:', targetId);
           }
           break;
         }
 
         case 'section.split': {
           // Split Here: TODO - Implement section splitting
-          console.log('[useMenuActions] Split section:', targetId);
+          logger.debug('[useMenuActions] Split section:', targetId);
           // This would need a new action in EditorContext
           // For now, just log
           break;
@@ -102,14 +103,14 @@ export function useMenuActions() {
 
         case 'section.delete': {
           // Delete: TODO - Implement section deletion
-          console.log('[useMenuActions] Delete section:', targetId);
+          logger.debug('[useMenuActions] Delete section:', targetId);
           // This would need a new action in EditorContext
           // For now, just log
           break;
         }
 
         default:
-          console.warn('[useMenuActions] Unknown action ID:', actionId);
+          logger.warn('[useMenuActions] Unknown action ID:', actionId);
       }
     },
     [actions, state.isPlaying],
@@ -117,4 +118,3 @@ export function useMenuActions() {
 
   return { executeAction };
 }
-

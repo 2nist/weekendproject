@@ -1,18 +1,11 @@
 import React from 'react';
 import useAppIPC from '../hooks/useAppIPC';
+import logger from '@/lib/logger';
 import SeamlessLoader from '../plugins/SeamlessLoader';
 import ContextualBlockStatus from '../plugins/ContextualBlockStatus';
 import ArrangementBlock from '../components/ArrangementBlock';
 
-function GridCell({
-  block,
-  index,
-  onSelect,
-  onDragStart,
-  onDrop,
-  onDragOver,
-  selected,
-}) {
+function GridCell({ block, index, onSelect, onDragStart, onDrop, onDragOver, selected }) {
   return (
     <div
       draggable
@@ -21,9 +14,7 @@ function GridCell({
       onDragOver={(e) => onDragOver(e, index)}
       onClick={() => onSelect(block?.id)}
       className={`min-h-[64px] p-3 rounded-md border flex items-center justify-center select-none cursor-grab ${
-        selected
-          ? 'border-blue-500 ring-2 ring-blue-200'
-          : 'border-gray-200 bg-white'
+        selected ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200 bg-white'
       }`}
     >
       {block ? (
@@ -51,8 +42,7 @@ export default function ArchitectView() {
   const blocks = React.useMemo(() => {
     if (remoteBlocks && remoteBlocks.length) {
       const arr = new Array(cellCount).fill(null);
-      for (let i = 0; i < Math.min(remoteBlocks.length, cellCount); i++)
-        arr[i] = remoteBlocks[i];
+      for (let i = 0; i < Math.min(remoteBlocks.length, cellCount); i++) arr[i] = remoteBlocks[i];
       return arr;
     }
     return new Array(cellCount).fill(null).map((_, i) => ({
@@ -79,7 +69,7 @@ export default function ArchitectView() {
         } catch (e) {}
       } catch (err) {
         // ignore load errors for now
-        console.error('Failed to load arrangement', err);
+        logger.error('Failed to load arrangement', err);
       }
     }
 
@@ -136,34 +126,30 @@ export default function ArchitectView() {
           className="grid gap-3"
           style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}
         >
-          {(loadedBlocks && loadedBlocks.length ? loadedBlocks : blocks).map(
-            (b, i) => (
-              <div
-                key={b ? b.id : `cell-${i}`}
-                draggable
-                onDragStart={(e) => onDragStart(e, i)}
-                onDrop={(e) => onDrop(e, i)}
-                onDragOver={(e) => onDragOver(e, i)}
-                onClick={() => onSelect(b?.id)}
-                className={`min-h-[64px] p-2`}
-              >
-                {b ? (
-                  <ArrangementBlock
-                    block={{
-                      name: b.name ?? b.label ?? `Block ${i + 1}`,
-                      length: b.length ?? b.bars ?? b.barLength ?? 4,
-                      color: b.color ?? 'bg-blue-400',
-                    }}
-                    className={
-                      selectedId === b.id ? 'ring-2 ring-blue-300' : ''
-                    }
-                  />
-                ) : (
-                  <div className="text-gray-300">Empty</div>
-                )}
-              </div>
-            ),
-          )}
+          {(loadedBlocks && loadedBlocks.length ? loadedBlocks : blocks).map((b, i) => (
+            <div
+              key={b ? b.id : `cell-${i}`}
+              draggable
+              onDragStart={(e) => onDragStart(e, i)}
+              onDrop={(e) => onDrop(e, i)}
+              onDragOver={(e) => onDragOver(e, i)}
+              onClick={() => onSelect(b?.id)}
+              className={`min-h-[64px] p-2`}
+            >
+              {b ? (
+                <ArrangementBlock
+                  block={{
+                    name: b.name ?? b.label ?? `Block ${i + 1}`,
+                    length: b.length ?? b.bars ?? b.barLength ?? 4,
+                    color: b.color ?? 'bg-blue-400',
+                  }}
+                  className={selectedId === b.id ? 'ring-2 ring-blue-300' : ''}
+                />
+              ) : (
+                <div className="text-gray-300">Empty</div>
+              )}
+            </div>
+          ))}
         </div>
       </section>
 

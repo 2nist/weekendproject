@@ -1,27 +1,34 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '../ui/button';
+import { handleAsyncError, useAsyncOperation } from '../../utils/errorHandling';
+import { LoadingSpinner, StatusIndicator } from '../../utils/errorHandling';
 
 export default function PathConfiguration() {
   const [config, setConfig] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    loadConfig();
-  }, []);
-
-  async function loadConfig() {
-    try {
+  const loadConfigOperation = useAsyncOperation(
+    async () => {
       const result = await window.electronAPI.invoke('PATH:GET_CONFIG');
       if (result.success) {
         setConfig(result.config);
+        return result.config;
+      } else {
+        throw new Error(result.error || 'Failed to load configuration');
       }
-    } catch (error) {
-      console.error('Failed to load path config:', error);
-    } finally {
-      setLoading(false);
-    }
-  }
+    },
+    {
+      onSuccess: (data) => {
+        console.log('[PathConfiguration] Config loaded successfully');
+      },
+      onError: (error) => {
+        console.error('[PathConfiguration] Failed to load config:', error.message);
+      },
+    },
+  );
+
+  useEffect(() => {
+    loadConfigOperation.execute();
+  }, []);
 
   async function selectDirectory(title, defaultPath) {
     try {
@@ -31,106 +38,161 @@ export default function PathConfiguration() {
       });
       if (result.success && result.path) {
         return result.path;
+      } else if (result.error) {
+        throw new Error(result.error);
       }
     } catch (error) {
-      console.error('Failed to select directory:', error);
+      const appError = handleAsyncError(error, 'PathConfiguration.selectDirectory');
+      console.error('[PathConfiguration] Directory selection failed:', appError.message);
+      // Show user-friendly error message
+      alert(`Failed to select directory: ${appError.userMessage}`);
     }
     return null;
   }
+
+  const enableGoogleDriveOperation = useAsyncOperation(
+    async (selectedPath) => {
+      const result = await window.electronAPI.invoke('PATH:ENABLE_GOOGLE_DRIVE', selectedPath);
+      if (result.success) {
+        await loadConfigOperation.execute();
+        return result;
+      } else {
+        throw new Error(result.error || 'Failed to enable Google Drive');
+      }
+    },
+    {
+      onSuccess: () => {
+        alert('Google Drive integration enabled!');
+      },
+      onError: (error) => {
+        console.error('[PathConfiguration] Failed to enable Google Drive:', error.message);
+        alert(`Failed to enable Google Drive: ${error.userMessage}`);
+      },
+    },
+  );
 
   async function enableGoogleDrive() {
     const detectedPath = config?.detected?.googleDrive;
     const selectedPath = await selectDirectory(
       'Select Google Drive Root Folder',
-      detectedPath || undefined
+      detectedPath || undefined,
     );
 
     if (selectedPath) {
-      setSaving(true);
-      try {
-        const result = await window.electronAPI.invoke('PATH:ENABLE_GOOGLE_DRIVE', selectedPath);
-        if (result.success) {
-          await loadConfig();
-          alert('Google Drive integration enabled!');
-        } else {
-          alert(`Failed to enable Google Drive: ${result.error}`);
-        }
-      } catch (error) {
-        console.error('Failed to enable Google Drive:', error);
-        alert('Failed to enable Google Drive integration');
-      } finally {
-        setSaving(false);
-      }
+      enableGoogleDriveOperation.execute(selectedPath);
     }
   }
 
-  async function disableCloud() {
-    setSaving(true);
-    try {
+  const disableCloudOperation = useAsyncOperation(
+    async () => {
       const result = await window.electronAPI.invoke('PATH:DISABLE_CLOUD');
       if (result.success) {
-        await loadConfig();
-        alert('Cloud storage disabled');
+        await loadConfigOperation.execute();
+        return result;
       } else {
-        alert(`Failed to disable cloud: ${result.error}`);
+        throw new Error(result.error || 'Failed to disable cloud');
       }
-    } catch (error) {
-      console.error('Failed to disable cloud:', error);
-    } finally {
-      setSaving(false);
-    }
+    },
+    {
+      onSuccess: () => {
+        alert('Cloud storage disabled');
+      },
+      onError: (error) => {
+        console.error('[PathConfiguration] Failed to disable cloud:', error.message);
+        alert(`Failed to disable cloud: ${error.userMessage}`);
+      },
+    },
+  );
+
+  async function disableCloud() {
+    disableCloudOperation.execute();
   }
+
+  const setCustomPathOperation = useAsyncOperation(
+    async (type, selectedPath) => {
+      const updates = {
+        ...config,
+        strategy: 'custom',
+        custom: {
+          ...config.custom,
+          [type]: selectedPath,
+        },
+      };
+      const result = await window.electronAPI.invoke('PATH:UPDATE_CONFIG', updates);
+      if (result.success) {
+        await loadConfigOperation.execute();
+        return result;
+      } else {
+        throw new Error(result.error || 'Failed to update custom path');
+      }
+    },
+    {
+      onError: (error) => {
+        console.error('[PathConfiguration] Failed to set custom path:', error.message);
+        alert(`Failed to set custom path: ${error.userMessage}`);
+      },
+    },
+  );
 
   async function setCustomPath(type) {
     const selectedPath = await selectDirectory(
       `Select ${type.toUpperCase()} Directory`,
-      config?.custom?.[type] || config?.local?.[type]
+      config?.custom?.[type] || config?.local?.[type],
     );
 
     if (selectedPath) {
-      setSaving(true);
-      try {
-        const updates = {
-          ...config,
-          strategy: 'custom',
-          custom: {
-            ...config.custom,
-            [type]: selectedPath,
-          },
-        };
-        const result = await window.electronAPI.invoke('PATH:UPDATE_CONFIG', updates);
-        if (result.success) {
-          await loadConfig();
-        }
-      } catch (error) {
-        console.error('Failed to set custom path:', error);
-      } finally {
-        setSaving(false);
-      }
+      setCustomPathOperation.execute(type, selectedPath);
     }
   }
 
-  async function setStrategy(strategy) {
-    setSaving(true);
-    try {
+  const setStrategyOperation = useAsyncOperation(
+    async (strategy) => {
       const updates = { ...config, strategy };
       const result = await window.electronAPI.invoke('PATH:UPDATE_CONFIG', updates);
       if (result.success) {
-        await loadConfig();
+        await loadConfigOperation.execute();
+        return result;
+      } else {
+        throw new Error(result.error || 'Failed to update strategy');
       }
-    } catch (error) {
-      console.error('Failed to update strategy:', error);
-    } finally {
-      setSaving(false);
-    }
+    },
+    {
+      onError: (error) => {
+        console.error('[PathConfiguration] Failed to update strategy:', error.message);
+        alert(`Failed to update strategy: ${error.userMessage}`);
+      },
+    },
+  );
+
+  async function setStrategy(strategy) {
+    setStrategyOperation.execute(strategy);
   }
 
-  if (loading) {
-    return <div className="p-4">Loading configuration...</div>;
+  if (loadConfigOperation.loading) {
+    return (
+      <div className="p-4 flex items-center justify-center">
+        <LoadingSpinner />
+        <span className="ml-2">Loading configuration...</span>
+      </div>
+    );
+  }
+
+  if (loadConfigOperation.error) {
+    return (
+      <div className="p-4">
+        <div className="text-destructive mb-2">Failed to load configuration</div>
+        <div className="text-sm text-muted-foreground mb-4">
+          {loadConfigOperation.error.userMessage}
+        </div>
+        <Button onClick={() => loadConfigOperation.execute()} size="sm">
+          Retry
+        </Button>
+      </div>
+    );
   }
 
   if (!config) {
-    return <div className="p-4 text-destructive">Failed to load configuration</div>;
+    return <div className="p-4 text-destructive">No configuration data available</div>;
   }
 
   return (
@@ -140,6 +202,15 @@ export default function PathConfiguration() {
         <p className="text-muted-foreground">
           Configure where your audio files, MIDI files, and analysis data are stored.
         </p>
+        <StatusIndicator
+          operations={[
+            loadConfigOperation,
+            enableGoogleDriveOperation,
+            disableCloudOperation,
+            setCustomPathOperation,
+            setStrategyOperation,
+          ]}
+        />
       </div>
 
       {/* Storage Strategy */}
@@ -151,7 +222,7 @@ export default function PathConfiguration() {
               type="radio"
               checked={config.strategy === 'local'}
               onChange={() => setStrategy('local')}
-              disabled={saving}
+              disabled={setStrategyOperation.loading}
             />
             <div>
               <div className="font-medium">Local Storage</div>
@@ -166,7 +237,7 @@ export default function PathConfiguration() {
               type="radio"
               checked={config.strategy === 'hybrid'}
               onChange={() => setStrategy('hybrid')}
-              disabled={saving || !config.cloud.enabled}
+              disabled={setStrategyOperation.loading || !config.cloud.enabled}
             />
             <div>
               <div className="font-medium">Hybrid (Local + Cloud)</div>
@@ -181,7 +252,7 @@ export default function PathConfiguration() {
               type="radio"
               checked={config.strategy === 'custom'}
               onChange={() => setStrategy('custom')}
-              disabled={saving}
+              disabled={setStrategyOperation.loading}
             />
             <div>
               <div className="font-medium">Custom Paths</div>
@@ -219,7 +290,7 @@ export default function PathConfiguration() {
       {/* Google Drive Integration */}
       <div className="border rounded-lg p-4">
         <h3 className="text-lg font-semibold mb-3">Google Drive Integration</h3>
-        
+
         {config.detected.googleDrive && (
           <div className="mb-3 p-3 bg-muted rounded">
             <div className="text-sm font-medium">Detected Google Drive:</div>
@@ -231,7 +302,12 @@ export default function PathConfiguration() {
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-green-600">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
               </svg>
               <span className="font-medium">Cloud storage enabled</span>
             </div>
@@ -279,24 +355,25 @@ export default function PathConfiguration() {
 
             <Button
               onClick={disableCloud}
-              disabled={saving}
+              disabled={disableCloudOperation.loading}
               variant="destructive"
               size="sm"
             >
-              Disable Cloud Storage
+              {disableCloudOperation.loading ? 'Disabling...' : 'Disable Cloud Storage'}
             </Button>
           </div>
         ) : (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Enable Google Drive to backup files to the cloud. Files will still be stored locally for fast access.
+              Enable Google Drive to backup files to the cloud. Files will still be stored locally
+              for fast access.
             </p>
             <Button
               onClick={enableGoogleDrive}
-              disabled={saving}
+              disabled={enableGoogleDriveOperation.loading}
               size="sm"
             >
-              Enable Google Drive
+              {enableGoogleDriveOperation.loading ? 'Enabling...' : 'Enable Google Drive'}
             </Button>
           </div>
         )}
@@ -307,17 +384,17 @@ export default function PathConfiguration() {
         <div className="border rounded-lg p-4">
           <h3 className="text-lg font-semibold mb-3">Custom Directories</h3>
           <div className="space-y-3">
-            {['audio', 'midi', 'json'].map(type => (
+            {['audio', 'midi', 'json'].map((type) => (
               <div key={type}>
                 <div className="flex items-center justify-between mb-1">
                   <span className="font-medium capitalize">{type}</span>
                   <Button
                     onClick={() => setCustomPath(type)}
-                    disabled={saving}
+                    disabled={setCustomPathOperation.loading}
                     size="sm"
                     variant="outline"
                   >
-                    Select Directory
+                    {setCustomPathOperation.loading ? 'Selecting...' : 'Select Directory'}
                   </Button>
                 </div>
                 <div className="text-sm font-mono bg-muted p-2 rounded">

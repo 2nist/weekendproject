@@ -29,49 +29,158 @@ const W_MFCC = 0.2;
 const W_RMS = 0.3;
 const W_FLUX = 0.2;
 
+class LRUCache {
+  constructor(maxSize = 1000) {
+    this.maxSize = maxSize;
+    this.cache = new Map();
+    this.hits = 0;
+    this.misses = 0;
+    this.sets = 0;
+  }
+
+  get(key) {
+    if (!this.cache.has(key)) {
+      this.misses++;
+      return null;
+    }
+    // Move to end (most recently used)
+    const value = this.cache.get(key);
+    this.cache.delete(key);
+    this.cache.set(key, value);
+    this.hits++;
+    return value;
+  }
+
+  set(key, value) {
+    // Delete if exists (to re-add at end)
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    }
+    // Evict oldest if at capacity
+    if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+    this.cache.set(key, value);
+    this.sets++;
+  }
+
+  clear() {
+    this.cache.clear();
+    this.hits = 0;
+    this.misses = 0;
+    this.sets = 0;
+  }
+
+  getSize() {
+    return this.cache.size;
+  }
+
+  getStats() {
+    const total = this.hits + this.misses;
+    return {
+      size: this.cache.size,
+      maxSize: this.maxSize,
+      hits: this.hits,
+      misses: this.misses,
+      hitRate: total > 0 ? this.hits / total : 0,
+      sets: this.sets,
+      utilizationPercent: (this.cache.size / this.maxSize) * 100,
+    };
+  }
+}
+
 class ArchitectCache {
   constructor() {
-    this.vectorCache = new Map();
-    this.similarityCache = new Map();
-    this.kernelCache = new Map();
+    // Set reasonable limits based on typical usage
+    this.vectorCache = new LRUCache(500); // ~10MB max for chroma/mfcc vectors
+    this.similarityCache = new LRUCache(200); // ~5MB max for similarity matrices
+    this.kernelCache = new LRUCache(50); // ~1MB max for gaussian kernels
     this.enabled = true;
   }
+
   getCachedVector(frames, start, end, type) {
     if (!this.enabled) return null;
     const key = `${type}-${start}-${end}`;
     return this.vectorCache.get(key) || null;
   }
+
   setCachedVector(frames, start, end, type, vector) {
     if (!this.enabled) return;
     const key = `${type}-${start}-${end}`;
     this.vectorCache.set(key, vector);
   }
+
   getCachedSimilarity(i, j, type) {
     if (!this.enabled) return null;
     const key = `${type}-${Math.min(i, j)}-${Math.max(i, j)}`;
     return this.similarityCache.get(key) || null;
   }
+
   setCachedSimilarity(i, j, type, value) {
     if (!this.enabled) return;
     const key = `${type}-${Math.min(i, j)}-${Math.max(i, j)}`;
     this.similarityCache.set(key, value);
   }
+
   getKernel(size, sigma) {
     const key = `${size}-${sigma || 'default'}`;
-    if (!this.kernelCache.has(key)) {
-      this.kernelCache.set(key, createCheckerboardKernel(size, sigma));
+    let kernel = this.kernelCache.get(key);
+    if (!kernel) {
+      kernel = createCheckerboardKernel(size, sigma);
+      this.kernelCache.set(key, kernel);
     }
-    return this.kernelCache.get(key);
+    return kernel;
   }
+
   clear() {
+    // Clear analysis-specific caches but keep reusable kernels
     this.vectorCache.clear();
     this.similarityCache.clear();
+    // Keep kernelCache as kernels are reusable across analyses
   }
+
+  clearAll() {
+    // Clear everything including kernels (for memory cleanup)
+    this.vectorCache.clear();
+    this.similarityCache.clear();
+    this.kernelCache.clear();
+  }
+
   getStats() {
     return {
-      vectors: this.vectorCache.size,
-      similarities: this.similarityCache.size,
-      kernels: this.kernelCache.size,
+      vectors: this.vectorCache.getStats(),
+      similarities: this.similarityCache.getStats(),
+      kernels: this.kernelCache.getStats(),
+      enabled: this.enabled,
+      totalHitRate: this.calculateTotalHitRate(),
+    };
+  }
+
+  calculateTotalHitRate() {
+    const vHits = this.vectorCache.hits;
+    const vMisses = this.vectorCache.misses;
+    const sHits = this.similarityCache.hits;
+    const sMisses = this.similarityCache.misses;
+    const totalHits = vHits + sHits;
+    const totalMisses = vMisses + sMisses;
+    const total = totalHits + totalMisses;
+    return total > 0 ? totalHits / total : 0;
+  }
+
+  // Memory monitoring
+  getMemoryUsage() {
+    // Rough estimate: vectors are ~12 floats (chroma), similarities are floats
+    const vectorBytes = this.vectorCache.getSize() * 12 * 4; // 12 floats * 4 bytes
+    const similarityBytes = this.similarityCache.getSize() * 4; // 1 float * 4 bytes
+    const kernelBytes = this.kernelCache.getSize() * 64 * 4; // ~64 floats per kernel * 4 bytes
+
+    return {
+      vectorsMB: Math.round((vectorBytes / 1024 / 1024) * 100) / 100,
+      similaritiesMB: Math.round((similarityBytes / 1024 / 1024) * 100) / 100,
+      kernelsMB: Math.round((kernelBytes / 1024 / 1024) * 100) / 100,
+      totalMB:
+        Math.round(((vectorBytes + similarityBytes + kernelBytes) / 1024 / 1024) * 100) / 100,
     };
   }
 }
@@ -102,7 +211,9 @@ function dotProduct(a, b) {
 }
 function cosineSimilarity(a, b) {
   if (!a || !b || a.length !== b.length) return 0;
-  let dot = 0, na = 0, nb = 0;
+  let dot = 0,
+    na = 0,
+    nb = 0;
   for (let i = 0; i < a.length; i++) {
     dot += a[i] * b[i];
     na += a[i] * a[i];
@@ -121,7 +232,8 @@ function smoothSeries(series = [], windowSize = 5) {
   if (!series.length || windowSize <= 1) return series;
   const half = Math.floor(windowSize / 2);
   return series.map((v, idx) => {
-    let sum = 0, count = 0;
+    let sum = 0,
+      count = 0;
     for (let off = -half; off <= half; off++) {
       const i = idx + off;
       if (i >= 0 && i < series.length) {
@@ -152,7 +264,8 @@ function createCheckerboardKernel(size, gaussianSigma = null) {
   const kernel = new Float32Array(size * size);
   const mid = Math.floor(size / 2);
   const gaussian = (x, y) => {
-    const dx = x - mid, dy = y - mid;
+    const dx = x - mid,
+      dy = y - mid;
     const dist = Math.sqrt(dx * dx + dy * dy);
     return Math.exp(-(dist * dist) / (2 * gaussianSigma * gaussianSigma));
   };
@@ -175,7 +288,8 @@ function convolveKernelOptimized(ssm, position, kernelObj) {
   const data = ssm.data;
   const halfSize = Math.floor(size / 2);
   if (position < halfSize || position >= n - halfSize) return 0;
-  let score = 0, valid = 0;
+  let score = 0,
+    valid = 0;
   for (let i = 0; i < size; i++) {
     for (let j = 0; j < size; j++) {
       const row = position - halfSize + i;
@@ -230,7 +344,11 @@ function detectNoveltyMultiScale(matrixObj, opts = {}) {
   }
   const smoothed1 = applyMedianFilter(combined, 5);
   const smoothed2 = smoothSeries(smoothed1, 7);
-  return { noveltyCurve: Array.from(smoothed2), scales: scaleResults, combined: Array.from(combined) };
+  return {
+    noveltyCurve: Array.from(smoothed2),
+    scales: scaleResults,
+    combined: Array.from(combined),
+  };
 }
 function adaptivePeakPicking(noveltyCurve, opts = {}) {
   const n = noveltyCurve.length;
@@ -251,9 +369,19 @@ function adaptivePeakPicking(noveltyCurve, opts = {}) {
     const threshold = median + sensitivity * mad;
     if (noveltyCurve[i] > threshold) {
       if (!peaks.length || i - peaks[peaks.length - 1].frame >= minPeakDistance) {
-        peaks.push({ frame: i, value: noveltyCurve[i], threshold, strength: (noveltyCurve[i] - threshold) / (mad + 0.001) });
+        peaks.push({
+          frame: i,
+          value: noveltyCurve[i],
+          threshold,
+          strength: (noveltyCurve[i] - threshold) / (mad + 0.001),
+        });
       } else if (noveltyCurve[i] > peaks[peaks.length - 1].value) {
-        peaks[peaks.length - 1] = { frame: i, value: noveltyCurve[i], threshold, strength: (noveltyCurve[i] - threshold) / (mad + 0.001) };
+        peaks[peaks.length - 1] = {
+          frame: i,
+          value: noveltyCurve[i],
+          threshold,
+          strength: (noveltyCurve[i] - threshold) / (mad + 0.001),
+        };
       }
     }
   }
@@ -277,9 +405,18 @@ function buildSimilarityMatrixOptimized(chroma, mfcc, rms, flux, opts = {}) {
         for (let j = Math.max(bj, i); j < jEnd; j++) {
           const sChroma = dotProduct(chromaNorm[i], chromaNorm[j]);
           const sMfcc = mfccNorm ? dotProduct(mfccNorm[i], mfccNorm[j]) : sChroma;
-          const vRms = rms[i] !== undefined && rms[j] !== undefined ? 1.0 - Math.min(1.0, Math.abs(rms[i] - rms[j])) : 1.0;
-          const vFlux = flux[i] !== undefined && flux[j] !== undefined ? 1.0 - Math.min(1.0, Math.abs(flux[i] - flux[j])) : 1.0;
-          const val = Math.max(0, Math.min(1, sChroma * W_CHROMA + sMfcc * W_MFCC + vRms * W_RMS + vFlux * W_FLUX));
+          const vRms =
+            rms[i] !== undefined && rms[j] !== undefined
+              ? 1.0 - Math.min(1.0, Math.abs(rms[i] - rms[j]))
+              : 1.0;
+          const vFlux =
+            flux[i] !== undefined && flux[j] !== undefined
+              ? 1.0 - Math.min(1.0, Math.abs(flux[i] - flux[j]))
+              : 1.0;
+          const val = Math.max(
+            0,
+            Math.min(1, sChroma * W_CHROMA + sMfcc * W_MFCC + vRms * W_RMS + vFlux * W_FLUX),
+          );
           data[i * n + j] = val;
           data[j * n + i] = val;
         }
@@ -290,10 +427,27 @@ function buildSimilarityMatrixOptimized(chroma, mfcc, rms, flux, opts = {}) {
 }
 function getTempoAdaptiveParams(linear, baseOpts = {}) {
   const tempo = linear?.beat_grid?.tempo_bpm || 120;
-  const tempoClass = tempo < 80 ? 'slow' : tempo < 100 ? 'moderate' : tempo < 140 ? 'normal' : tempo < 180 ? 'fast' : 'very_fast';
+  const tempoClass =
+    tempo < 80
+      ? 'slow'
+      : tempo < 100
+        ? 'moderate'
+        : tempo < 140
+          ? 'normal'
+          : tempo < 180
+            ? 'fast'
+            : 'very_fast';
   const params = { ...baseOpts };
-  params.noveltyKernelSizes = { slow: [7, 11, 19], moderate: [5, 9, 15], normal: [5, 9, 13], fast: [3, 7, 11], very_fast: [3, 5, 9] }[tempoClass];
-  params.adaptiveSensitivity = { slow: 1.8, moderate: 1.5, normal: 1.2, fast: 1.0, very_fast: 0.8 }[tempoClass];
+  params.noveltyKernelSizes = {
+    slow: [7, 11, 19],
+    moderate: [5, 9, 15],
+    normal: [5, 9, 13],
+    fast: [3, 7, 11],
+    very_fast: [3, 5, 9],
+  }[tempoClass];
+  params.adaptiveSensitivity = { slow: 1.8, moderate: 1.5, normal: 1.2, fast: 1.0, very_fast: 0.8 }[
+    tempoClass
+  ];
   params.minSectionSeconds = Math.max(1.5, 3.0 * (120 / tempo));
   params.tempoClass = tempoClass;
   return params;
@@ -311,18 +465,23 @@ function computeEnergyNovelty(rms) {
   for (let i = 1; i < n; i++) novelty[i] = Math.abs(rms[i] - rms[i - 1]) / (rms[i - 1] + 0.001);
   return smoothSeries(novelty, 5);
 }
-function computeFluxNovelty(flux) { return smoothSeries(flux, 5); }
+function computeFluxNovelty(flux) {
+  return smoothSeries(flux, 5);
+}
 function refineWithTimbreAndEnergy(boundaries, mfcc, rms, flux, n, opts = {}) {
   if (!mfcc || !mfcc.length) return boundaries;
   const mfccNovelty = computeMFCCNovelty(mfcc);
   const energyNovelty = computeEnergyNovelty(rms);
   const fluxNovelty = flux ? computeFluxNovelty(flux) : mfccNovelty;
   const combined = new Float32Array(n);
-  const mfccWeight = typeof opts.mfccWeight === 'number' ? Math.min(1, Math.max(0, opts.mfccWeight)) : 0.5;
+  const mfccWeight =
+    typeof opts.mfccWeight === 'number' ? Math.min(1, Math.max(0, opts.mfccWeight)) : 0.5;
   const remaining = 1 - mfccWeight;
   const energyWeight = remaining * 0.6;
   const fluxWeight = remaining * 0.4;
-  for (let i = 0; i < n; i++) combined[i] = mfccNovelty[i] * mfccWeight + energyNovelty[i] * energyWeight + fluxNovelty[i] * fluxWeight;
+  for (let i = 0; i < n; i++)
+    combined[i] =
+      mfccNovelty[i] * mfccWeight + energyNovelty[i] * energyWeight + fluxNovelty[i] * fluxWeight;
   const newBoundaries = new Set(boundaries);
   const sorted = Array.from(newBoundaries).sort((a, b) => a - b);
   const globalMax = Math.max(...combined);
@@ -336,10 +495,14 @@ function refineWithTimbreAndEnergy(boundaries, mfcc, rms, flux, n, opts = {}) {
     if (duration < 2.0 / FRAME_HOP_SECONDS) continue;
     const searchStart = start + Math.floor(duration * 0.2);
     const searchEnd = end - Math.floor(duration * 0.2);
-    let bestScore = -1, bestFrame = -1;
+    let bestScore = -1,
+      bestFrame = -1;
     for (let k = searchStart; k < searchEnd; k++) {
       if (k < minGap || k > n - minGap) continue;
-      if (combined[k] > bestScore) { bestScore = combined[k]; bestFrame = k; }
+      if (combined[k] > bestScore) {
+        bestScore = combined[k];
+        bestFrame = k;
+      }
     }
     if (bestFrame !== -1 && bestScore > globalMean) {
       const isSignificant = bestScore > globalMax * sensitivityFactor;
@@ -385,10 +548,14 @@ function snapBoundariesToGrid(boundaries, linear) {
   const beats = linear.beat_grid.beat_timestamps;
   return boundaries.map((frame) => {
     const t = frame * FRAME_HOP_SECONDS;
-    let closest = beats[0], best = Math.abs(beats[0] - t);
+    let closest = beats[0],
+      best = Math.abs(beats[0] - t);
     for (const b of beats) {
       const d = Math.abs(b - t);
-      if (d < best) { best = d; closest = b; }
+      if (d < best) {
+        best = d;
+        closest = b;
+      }
     }
     return Math.round(closest / FRAME_HOP_SECONDS);
   });
@@ -398,7 +565,13 @@ function computeDurationBars(section, linear) {
   const dur = (section.end_frame - section.start_frame) * FRAME_HOP_SECONDS;
   return dur / ((60 / tempo) * 4);
 }
-function clusterSections(matrixObj, boundaries, hardBoundaries = new Set(), forceOverSeg = false, similarityThreshold = 0.6) {
+function clusterSections(
+  matrixObj,
+  boundaries,
+  hardBoundaries = new Set(),
+  forceOverSeg = false,
+  similarityThreshold = 0.6,
+) {
   const { data, size: n } = matrixObj;
   const sections = [];
   const clusters = new Map();
@@ -415,7 +588,8 @@ function clusterSections(matrixObj, boundaries, hardBoundaries = new Set(), forc
     clusters.set(clusterId, [i]);
     for (let j = i + 1; j < sections.length; j++) {
       if (sections[j].cluster_id !== null) continue;
-      let sum = 0, count = 0;
+      let sum = 0,
+        count = 0;
       const step = 4;
       for (let y = sections[i].start_frame; y < sections[i].end_frame; y += step) {
         for (let x = sections[j].start_frame; x < sections[j].end_frame; x += step) {
@@ -428,7 +602,10 @@ function clusterSections(matrixObj, boundaries, hardBoundaries = new Set(), forc
       const maxFrame = Math.max(sections[i].end_frame, sections[j].end_frame);
       let spansHard = false;
       for (const hb of hardBoundaries) {
-        if (hb > minFrame && hb < maxFrame) { spansHard = true; break; }
+        if (hb > minFrame && hb < maxFrame) {
+          spansHard = true;
+          break;
+        }
       }
       if (avg > similarityThreshold && !spansHard) {
         sections[j].cluster_id = clusterId;
@@ -440,19 +617,40 @@ function clusterSections(matrixObj, boundaries, hardBoundaries = new Set(), forc
   return { sections, clusters };
 }
 function labelSections(sections, clusters, linear) {
-  const sortedClusters = Array.from(clusters.entries()).map(([id, indices]) => ({ id, indices, firstOccurrence: Math.min(...indices), size: indices.length })).sort((a, b) => a.firstOccurrence - b.firstOccurrence);
+  const sortedClusters = Array.from(clusters.entries())
+    .map(([id, indices]) => ({
+      id,
+      indices,
+      firstOccurrence: Math.min(...indices),
+      size: indices.length,
+    }))
+    .sort((a, b) => a.firstOccurrence - b.firstOccurrence);
   const labelMap = new Map();
   const maxRepeats = Math.max(...sortedClusters.map((c) => c.size));
   for (let i = 0; i < sortedClusters.length; i++) {
     const cluster = sortedClusters[i];
     const repeatCount = cluster.size;
     const position = cluster.firstOccurrence;
-    if (repeatCount === maxRepeats && repeatCount >= 3) { labelMap.set(cluster.id, 'chorus'); continue; }
-    if (position === 0 && repeatCount === 1) { labelMap.set(cluster.id, 'intro'); continue; }
-    if (position === sections.length - 1 && repeatCount === 1) { labelMap.set(cluster.id, 'outro'); continue; }
+    if (repeatCount === maxRepeats && repeatCount >= 3) {
+      labelMap.set(cluster.id, 'chorus');
+      continue;
+    }
+    if (position === 0 && repeatCount === 1) {
+      labelMap.set(cluster.id, 'intro');
+      continue;
+    }
+    if (position === sections.length - 1 && repeatCount === 1) {
+      labelMap.set(cluster.id, 'outro');
+      continue;
+    }
     if (repeatCount === 1 && i > 0) {
-      const surrounded = sortedClusters.filter((c, idx) => idx !== i && c.size > 1).some((c) => c.firstOccurrence < position && c.indices.some((idx) => idx > position));
-      if (surrounded) { labelMap.set(cluster.id, 'bridge'); continue; }
+      const surrounded = sortedClusters
+        .filter((c, idx) => idx !== i && c.size > 1)
+        .some((c) => c.firstOccurrence < position && c.indices.some((idx) => idx > position));
+      if (surrounded) {
+        labelMap.set(cluster.id, 'bridge');
+        continue;
+      }
     }
     labelMap.set(cluster.id, 'verse');
   }
@@ -463,19 +661,23 @@ function attachSemanticSignatures(sections, linear) {
   const semanticFrames = linear.semantic_features?.frames || [];
   if (!semanticFrames.length) return sections;
   for (const section of sections) {
-    const start = section.start_frame, end = section.end_frame;
+    const start = section.start_frame,
+      end = section.end_frame;
     const relevant = semanticFrames.filter((f) => {
       const frameIdx = Math.round(f.timestamp / FRAME_HOP_SECONDS);
       return frameIdx >= start && frameIdx <= end;
     });
-    section.semantic = relevant.length ? summarizeFrames(relevant) : { mood: 'neutral', energy: 0.5, complexity: 0.5 };
+    section.semantic = relevant.length
+      ? summarizeFrames(relevant)
+      : { mood: 'neutral', energy: 0.5, complexity: 0.5 };
   }
   return sections;
 }
 function mergeSimilarSections(sections, chromaFrames, mfccFrames, opts = {}) {
   const threshold = opts.mergeSimilarityThreshold || 0.85;
   for (let i = 0; i < sections.length - 1; i++) {
-    const curr = sections[i], next = sections[i + 1];
+    const curr = sections[i],
+      next = sections[i + 1];
     if (!curr || !next || curr.merged || next.merged) continue;
     const currChroma = getCachedAvgVector(chromaFrames, curr.start_frame, curr.end_frame, 'chroma');
     const nextChroma = getCachedAvgVector(chromaFrames, next.start_frame, next.end_frame, 'chroma');
@@ -500,7 +702,8 @@ function mergeSemanticSections(sections, opts = {}) {
   if (!sections.some((s) => s.semantic)) return sections;
   const energyThreshold = opts.semanticEnergyThreshold || 0.15;
   for (let i = 0; i < sections.length - 1; i++) {
-    const curr = sections[i], next = sections[i + 1];
+    const curr = sections[i],
+      next = sections[i + 1];
     if (!curr || !next || curr.merged || next.merged) continue;
     if (!curr.semantic || !next.semantic) continue;
     const energyDiff = Math.abs(curr.semantic.energy - next.semantic.energy);
@@ -516,7 +719,16 @@ function mergeSemanticSections(sections, opts = {}) {
 }
 function applyTheoryGlue(sections, linear) {
   if (!theory || !theory.validateStructure) return sections;
-  const theoryInput = { sections: sections.map((s) => ({ start_time: s.start_frame * FRAME_HOP_SECONDS, end_time: s.end_frame * FRAME_HOP_SECONDS, label: s.label, cluster_id: s.cluster_id })), beat_grid: linear.beat_grid, metadata: linear.metadata };
+  const theoryInput = {
+    sections: sections.map((s) => ({
+      start_time: s.start_frame * FRAME_HOP_SECONDS,
+      end_time: s.end_frame * FRAME_HOP_SECONDS,
+      label: s.label,
+      cluster_id: s.cluster_id,
+    })),
+    beat_grid: linear.beat_grid,
+    metadata: linear.metadata,
+  };
   const validation = theory.validateStructure(theoryInput);
   if (validation.suggestions && validation.suggestions.length) {
     for (const suggestion of validation.suggestions) {
@@ -533,7 +745,10 @@ async function analyzeStructure(linear, progressCallback = () => {}, opts = {}) 
   const config = loadConfig();
   const mergedOpts = { ...config.architect_v2, ...opts };
   const adaptiveOpts = getTempoAdaptiveParams(linear, mergedOpts);
+
+  // Clear analysis-specific caches at start (keep reusable kernels)
   architectCache.clear();
+
   progressCallback({ stage: 'architect', progress: 10, message: 'Extracting features' });
   const chromaFrames = linear.chroma_frames?.map((f) => f.chroma || []) || [];
   const mfccFrames = linear.mfcc_frames?.map((f) => f.mfcc || []) || [];
@@ -548,18 +763,37 @@ async function analyzeStructure(linear, progressCallback = () => {}, opts = {}) 
   const ssm = buildSimilarityMatrixOptimized(chromaDS, mfccDS, rmsDS, fluxDS, adaptiveOpts);
   progressCallback({ stage: 'architect', progress: 40, message: 'Novelty' });
   const scaleWeights = mergedOpts.scaleWeights || mergedOpts.detailScaleWeights || null;
-  const noveltyResult = detectNoveltyMultiScale(ssm, { noveltyKernelSizes: adaptiveOpts.noveltyKernelSizes, scaleWeights });
+  const noveltyResult = detectNoveltyMultiScale(ssm, {
+    noveltyKernelSizes: adaptiveOpts.noveltyKernelSizes,
+    scaleWeights,
+  });
   progressCallback({ stage: 'architect', progress: 50, message: 'Peak picking' });
   const sensitivity = mergedOpts.adaptiveSensitivity || adaptiveOpts.adaptiveSensitivity;
-  const peaks = adaptivePeakPicking(noveltyResult.noveltyCurve, { sensitivity, localWindowSec: 10.0, minPeakDistance: Math.round((adaptiveOpts.minSectionSeconds || 1.5) / FRAME_HOP_SECONDS / downsampleFactor) });
+  const peaks = adaptivePeakPicking(noveltyResult.noveltyCurve, {
+    sensitivity,
+    localWindowSec: 10.0,
+    minPeakDistance: Math.round(
+      (adaptiveOpts.minSectionSeconds || 1.5) / FRAME_HOP_SECONDS / downsampleFactor,
+    ),
+  });
   let boundaries = [0, ...peaks.map((p) => p.frame * downsampleFactor), chromaFrames.length - 1];
   boundaries = Array.from(new Set(boundaries)).sort((a, b) => a - b);
   progressCallback({ stage: 'architect', progress: 60, message: 'MFCC refine' });
-  boundaries = refineWithTimbreAndEnergy(boundaries, mfccFrames, rms, flux, chromaFrames.length, { mfccWeight: mergedOpts.mfccWeight, mfccSensitivity: adaptiveOpts.mfccSensitivity || 0.25, minSectionFrames: Math.round((adaptiveOpts.minSectionSeconds || 1.5) / FRAME_HOP_SECONDS) });
+  boundaries = refineWithTimbreAndEnergy(boundaries, mfccFrames, rms, flux, chromaFrames.length, {
+    mfccWeight: mergedOpts.mfccWeight,
+    mfccSensitivity: adaptiveOpts.mfccSensitivity || 0.25,
+    minSectionFrames: Math.round((adaptiveOpts.minSectionSeconds || 1.5) / FRAME_HOP_SECONDS),
+  });
   boundaries = snapBoundariesToGrid(boundaries, linear);
   progressCallback({ stage: 'architect', progress: 70, message: 'Clustering' });
   const fullSSM = buildSimilarityMatrixOptimized(chromaFrames, mfccFrames, rms, flux, adaptiveOpts);
-  const { sections, clusters } = clusterSections(fullSSM, boundaries, new Set(), mergedOpts.forceOverSeg || false, mergedOpts.clusterSimilarity || 0.6);
+  const { sections, clusters } = clusterSections(
+    fullSSM,
+    boundaries,
+    new Set(),
+    mergedOpts.forceOverSeg || false,
+    mergedOpts.clusterSimilarity || 0.6,
+  );
   precomputeSectionVectors(sections, chromaFrames, mfccFrames);
   progressCallback({ stage: 'architect', progress: 80, message: 'Labeling' });
   labelSections(sections, clusters, linear);
@@ -571,11 +805,42 @@ async function analyzeStructure(linear, progressCallback = () => {}, opts = {}) 
   finalSections = applyTheoryGlue(finalSections, linear);
   progressCallback({ stage: 'architect', progress: 95, message: 'Finalize' });
   const output = {
-    sections: finalSections.map((s, idx) => ({ time_range: { start_time: s.start_frame * FRAME_HOP_SECONDS, end_time: s.end_frame * FRAME_HOP_SECONDS }, label: s.label, cluster_id: s.cluster_id, section_id: `v2-${idx}`, duration_bars: computeDurationBars(s, linear), semantic: s.semantic })),
-    metadata: { version: '2.0', tempo_class: adaptiveOpts.tempoClass || 'normal', total_sections: finalSections.length, cache_stats: architectCache.getStats() },
-    debug: { noveltyCurve: noveltyResult.noveltyCurve, novelty_curve: noveltyResult.noveltyCurve, peaks: peaks.map((p) => ({ frame: p.frame * downsampleFactor, strength: p.strength })), scales: noveltyResult.scales },
+    sections: finalSections.map((s, idx) => ({
+      time_range: {
+        start_time: s.start_frame * FRAME_HOP_SECONDS,
+        end_time: s.end_frame * FRAME_HOP_SECONDS,
+      },
+      label: s.label,
+      cluster_id: s.cluster_id,
+      section_id: `v2-${idx}`,
+      duration_bars: computeDurationBars(s, linear),
+      semantic: s.semantic,
+    })),
+    metadata: {
+      version: '2.0',
+      tempo_class: adaptiveOpts.tempoClass || 'normal',
+      total_sections: finalSections.length,
+      cache_stats: architectCache.getStats(),
+      memory_usage: architectCache.getMemoryUsage(),
+    },
+    debug: {
+      noveltyCurve: noveltyResult.noveltyCurve,
+      novelty_curve: noveltyResult.noveltyCurve,
+      peaks: peaks.map((p) => ({ frame: p.frame * downsampleFactor, strength: p.strength })),
+      scales: noveltyResult.scales,
+    },
   };
   progressCallback({ stage: 'architect', progress: 100, message: 'Complete' });
   return output;
 }
-module.exports = { analyzeStructure, _internal: { architectCache, buildSimilarityMatrixOptimized, detectNoveltyMultiScale, adaptivePeakPicking, clusterSections, labelSections } };
+module.exports = {
+  analyzeStructure,
+  _internal: {
+    architectCache,
+    buildSimilarityMatrixOptimized,
+    detectNoveltyMultiScale,
+    adaptivePeakPicking,
+    clusterSections,
+    labelSections,
+  },
+};

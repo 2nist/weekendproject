@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { X, Trash2, Copy, Scissors } from 'lucide-react';
-import type { SelectionTarget } from '@/types/editor';
 
 // Legacy type alias for backward compatibility
-export type SelectedObject = 
+export type SelectedObject =
   | { type: 'beat'; data: any }
   | { type: 'measure'; data: any }
   | { type: 'section'; data: any }
@@ -13,7 +12,10 @@ export type SelectedObject =
 interface ContextualInspectorProps {
   selected: SelectedObject;
   onClose: () => void;
-  onUpdateBeat?: (beatId: string, updates: { chord?: string; function?: string; hasKick?: boolean; hasSnare?: boolean }) => void;
+  onUpdateBeat?: (
+    beatId: string,
+    updates: { chord?: string; function?: string; hasKick?: boolean; hasSnare?: boolean },
+  ) => void;
   onUpdateSection?: (sectionId: string, updates: { label?: string; color?: string }) => void;
   onDeleteSection?: (sectionId: string) => void;
   onDuplicateSection?: (sectionId: string) => void;
@@ -112,7 +114,10 @@ export const ContextualInspector: React.FC<ContextualInspectorProps> = ({
         {selected.type === 'beat' && (
           <>
             <div className="space-y-2">
-              <label htmlFor="chord-input" className="block text-sm font-medium text-slate-300 mb-1">
+              <label
+                htmlFor="chord-input"
+                className="block text-sm font-medium text-slate-300 mb-1"
+              >
                 Chord
               </label>
               <input
@@ -140,7 +145,10 @@ export const ContextualInspector: React.FC<ContextualInspectorProps> = ({
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="function-select" className="block text-sm font-medium text-slate-300 mb-1">
+              <label
+                htmlFor="function-select"
+                className="block text-sm font-medium text-slate-300 mb-1"
+              >
                 Function
               </label>
               <select
@@ -216,16 +224,17 @@ export const ContextualInspector: React.FC<ContextualInspectorProps> = ({
               <div>Bar Number: {selected.data.index || selected.data.barNumber}</div>
               <div>Beats: {selected.data.beats?.length || 0}</div>
             </div>
-            <p className="text-xs text-slate-500">
-              Measure editing coming soon...
-            </p>
+            <p className="text-xs text-slate-500">Measure editing coming soon...</p>
           </div>
         )}
 
         {selected.type === 'section' && (
           <>
             <div className="space-y-2">
-              <label htmlFor="section-label" className="block text-sm font-medium text-slate-300 mb-1">
+              <label
+                htmlFor="section-label"
+                className="block text-sm font-medium text-slate-300 mb-1"
+              >
                 Label
               </label>
               <input
@@ -246,7 +255,10 @@ export const ContextualInspector: React.FC<ContextualInspectorProps> = ({
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="section-color" className="block text-sm font-medium text-slate-300 mb-1">
+              <label
+                htmlFor="section-color"
+                className="block text-sm font-medium text-slate-300 mb-1"
+              >
                 Color
               </label>
               <select
@@ -333,4 +345,3 @@ export const ContextualInspector: React.FC<ContextualInspectorProps> = ({
     </div>
   );
 };
-

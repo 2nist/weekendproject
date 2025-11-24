@@ -13,6 +13,8 @@ const { getEssentia, loadAudioFile } = require('./fallbacks/essentiaLoader');
 const { prepareAudioFile, cleanupTempFile } = require('./fileProcessor');
 const pythonEssentia = require('./pythonEssentia');
 const simpleAnalyzer = require('./fallbacks/simpleAudioAnalyzer');
+const TemplateManager = require('./templateManager');
+const templateManager = new TemplateManager();
 const {
   calculateRMS,
   calculateChromaFlux,
@@ -158,11 +160,12 @@ function calculateFileHash(filePath) {
  * @param {Function} progressCallback - Callback for progress updates (0-100)
  * @returns {Promise<Object>} Linear analysis object per schema
  */
+
 async function analyzeAudio(
   filePath,
   progressCallback = () => {},
   metadataOverrides = {},
-  harmonyOptions = {},
+  harmonyOptions = {}, // ← Can now include { template: 'jazz' }
 ) {
   // Prefer the Python sidecar using librosa for robust analysis.
   progressCallback(5);
@@ -178,8 +181,25 @@ async function analyzeAudio(
     if (pythonAvailable) {
       logger.pass1('[Listener] ✅ Python+Librosa detected, using for analysis');
       progressCallback(20);
+
+      // Prepare audio file for Python (convert to WAV if needed)
+      let audioPathToAnalyze = filePath;
+      let isTempFile = false;
       try {
-        const result = await pythonEssentia.analyzeAudioWithPython(filePath, (p) =>
+        if (path.extname(filePath).toLowerCase() !== '.wav') {
+          progressCallback(15);
+          audioPathToAnalyze = await prepareAudioFile(filePath);
+          isTempFile = true;
+          logger.pass1('[Listener] Converted audio file to WAV for Python analysis');
+        }
+      } catch (error) {
+        logger.warn('[Listener] Audio conversion failed for Python:', error);
+        // Continue with original file - Python might handle it
+        audioPathToAnalyze = filePath;
+      }
+
+      try {
+        const result = await pythonEssentia.analyzeAudioWithPython(audioPathToAnalyze, (p) =>
           progressCallback(20 + p * 0.8),
         );
         if (result && result.source === 'python_librosa') {
@@ -195,9 +215,15 @@ async function analyzeAudio(
           output.metadata.analysis_quality = 'enhanced';
           output.metadata.fallback_used = false;
           // Run TypeScript ChordAnalyzer to generate beat-sync chord labels
-          // Use harmony options if provided (from Analysis Lab)
-          const harmonyOpts =
-            harmonyOptions && Object.keys(harmonyOptions).length > 0 ? harmonyOptions : {};
+          // Load template if specified
+          let analysisSettings = {};
+          if (harmonyOptions.template) {
+            analysisSettings = await templateManager.getTemplate(harmonyOptions.template);
+          }
+
+          // Merge template with any custom overrides
+          const harmonyOpts = { ...analysisSettings, ...harmonyOptions };
+
           try {
             runTypeScriptChordAnalyzer(output, harmonyOpts);
           } catch (ex) {
@@ -243,12 +269,23 @@ async function analyzeAudio(
             output.metadata = output.metadata || {};
             output.metadata.harmonyOptions = harmonyOptions;
           }
+
+          // Cleanup temp file if created
+          if (isTempFile) {
+            cleanupTempFile(audioPathToAnalyze);
+          }
+
           progressCallback(100);
           return { fileHash, linear_analysis: output };
         }
       } catch (err) {
         logger.warn('[Listener] Python analysis failed:', err.message);
         logger.warn('[Listener] Error details:', err.stack);
+      } finally {
+        // Ensure temp file cleanup even on error
+        if (isTempFile) {
+          cleanupTempFile(audioPathToAnalyze);
+        }
       }
     } else {
       logger.warn('❌ Python+Librosa not available. Checking for Essentia.js...');
@@ -328,9 +365,13 @@ async function analyzeAudio(
       );
       applyMetadataOverrides(processed.linear_analysis, metadataOverrides);
       // Re-run TS ChordAnalyzer on Essentia.js results (overwrite raw events)
-      // Use harmony options if provided (from Analysis Lab)
-      const harmonyOpts =
-        harmonyOptions && Object.keys(harmonyOptions).length > 0 ? harmonyOptions : {};
+      // Load template if specified
+      let analysisSettings = {};
+      if (harmonyOptions.template) {
+        analysisSettings = await templateManager.getTemplate(harmonyOptions.template);
+      }
+      // Merge template with any custom overrides
+      const harmonyOpts = { ...analysisSettings, ...harmonyOptions };
       try {
         runTypeScriptChordAnalyzer(processed.linear_analysis, harmonyOpts);
       } catch (e) {
@@ -411,9 +452,13 @@ async function analyzeAudio(
 
     progressCallback(100);
     applyMetadataOverrides(result.linear_analysis, metadataOverrides);
-    // Use harmony options if provided (from Analysis Lab)
-    const harmonyOpts =
-      harmonyOptions && Object.keys(harmonyOptions).length > 0 ? harmonyOptions : {};
+    // Load template if specified
+    let analysisSettings = {};
+    if (harmonyOptions.template) {
+      analysisSettings = await templateManager.getTemplate(harmonyOptions.template);
+    }
+    // Merge template with any custom overrides
+    const harmonyOpts = { ...analysisSettings, ...harmonyOptions };
     try {
       runTypeScriptChordAnalyzer(result.linear_analysis, harmonyOpts);
     } catch (e) {
@@ -846,15 +891,20 @@ async function processWithEssentiaJS(
 
         // 2. DSP Processing (Only for non-silent frames)
         let frameVector = null;
+        let windowed = null;
+        let spectrum = null;
+        let peaks = null;
+        let hpcpOutput = null;
+
         try {
           frameVector = essentia.arrayToVector(frame);
 
           // Windowing
-          const windowed = essentia.Windowing(frameVector, 'hann', frameSize);
+          windowed = essentia.Windowing(frameVector, 'hann', frameSize);
           if (!windowed.frame) throw new Error('Windowing failed');
 
           // Spectrum
-          const spectrum = essentia.Spectrum(windowed.frame, frameSize);
+          spectrum = essentia.Spectrum(windowed.frame, frameSize);
           if (!spectrum.spectrum) {
             windowed.frame.delete();
             throw new Error('Spectrum failed');
@@ -896,12 +946,11 @@ async function processWithEssentiaJS(
           if (peaksSize < 3) {
             chromaVector = new Array(12).fill(0);
           } else {
-            const hpcpOutput = essentia.HPCP(peaks.frequencies, peaks.magnitudes);
+            hpcpOutput = essentia.HPCP(peaks.frequencies, peaks.magnitudes);
             if (hpcpOutput.hpcp) {
               chromaVector = essentia.vectorToArray
                 ? essentia.vectorToArray(hpcpOutput.hpcp)
                 : Array.from(hpcpOutput.hpcp);
-              hpcpOutput.hpcp.delete();
             }
           }
 
@@ -967,12 +1016,6 @@ async function processWithEssentiaJS(
 
           prevChromaVector = chromaVector;
           prevRms = frameRMS;
-
-          // Cleanup C++ objects for this frame
-          windowed.frame.delete();
-          spectrum.spectrum.delete();
-          peaks.frequencies.delete();
-          peaks.magnitudes.delete();
         } catch (frameError) {
           chromaFailures++;
           if (chromaFailures <= maxChromaFailures) {
@@ -980,7 +1023,37 @@ async function processWithEssentiaJS(
           }
           chromaFrames.push({ timestamp, chroma: new Array(12).fill(0) });
         } finally {
-          if (frameVector && frameVector.delete) frameVector.delete();
+          // ✅ FIX: Delete ALL WASM objects in reverse order to prevent memory leaks
+          if (hpcpOutput?.hpcp?.delete) {
+            try {
+              hpcpOutput.hpcp.delete();
+            } catch (e) {}
+          }
+          if (peaks?.magnitudes?.delete) {
+            try {
+              peaks.magnitudes.delete();
+            } catch (e) {}
+          }
+          if (peaks?.frequencies?.delete) {
+            try {
+              peaks.frequencies.delete();
+            } catch (e) {}
+          }
+          if (spectrum?.spectrum?.delete) {
+            try {
+              spectrum.spectrum.delete();
+            } catch (e) {}
+          }
+          if (windowed?.frame?.delete) {
+            try {
+              windowed.frame.delete();
+            } catch (e) {}
+          }
+          if (frameVector?.delete) {
+            try {
+              frameVector.delete();
+            } catch (e) {}
+          }
         }
 
         frameIndex++;
@@ -1003,7 +1076,7 @@ async function processWithEssentiaJS(
         }
       }
     } catch (loopError) {
-      console.error('Chroma extraction loop crashed:', loopError.message);
+      logger.error('Chroma extraction loop crashed:', loopError.message);
     } finally {
       if (audioVector && audioVector.delete) {
         try {
@@ -1421,4 +1494,5 @@ module.exports = {
   detectChordFromChroma,
   calculateTempoStability,
   recalcChords,
+  templateManager, // ← NEW EXPORT
 };

@@ -9,6 +9,7 @@ import SectionDetailPanel from '../components/SectionDetailPanel';
 import SectionSculptor from '../components/SectionSculptor';
 import SandboxMode from '../components/SandboxMode';
 import { HarmonicGrid } from '../components/grid/HarmonicGrid';
+import logger from '@/lib/logger';
 import NoveltyCurveVisualizer from '../components/NoveltyCurveVisualizer';
 
 export default function Architect() {
@@ -140,7 +141,7 @@ export default function Architect() {
     const blocksChanged = JSON.stringify(prevBlocksRef.current) !== JSON.stringify(remoteBlocks);
 
     if (blocksChanged) {
-      console.log('Architect: remoteBlocks changed:', remoteBlocks?.length || 0);
+      logger.debug('Architect: remoteBlocks changed:', remoteBlocks?.length || 0);
       prevBlocksRef.current = remoteBlocks;
     }
 
@@ -275,19 +276,19 @@ export default function Architect() {
           linearAnalysis={analysisData}
           structuralMap={structuralMap}
           onBeatClick={(beat) => {
-            console.log('Beat clicked:', beat);
+            logger.debug('Beat clicked:', beat);
           }}
           onBeatEdit={(beat, newChord) => {
-            console.log('Beat edit:', beat, newChord);
+            logger.debug('Beat edit:', beat, newChord);
           }}
           onSectionEdit={(section) => {
-            console.log('Section edit:', section);
+            logger.debug('Section edit:', section);
           }}
           onSectionClone={(section) => {
-            console.log('Section clone:', section);
+            logger.debug('Section clone:', section);
           }}
           onProgressionEdit={(progression) => {
-            console.log('Progression edit:', progression);
+            logger.debug('Progression edit:', progression);
           }}
         />
       </div>
@@ -379,7 +380,7 @@ export default function Architect() {
             section={selectedSection}
             fileHash={globalThis.__lastAnalysisHash || globalThis.__currentFileHash || null}
             onUpdate={(update) => {
-              console.log('Section update:', update);
+              logger.debug('Section update:', update);
             }}
           />
         </aside>
@@ -415,11 +416,11 @@ export default function Architect() {
         <SandboxMode
           onGenerate={async (constraints) => {
             try {
-              console.log('[Architect] Generating structure with constraints:', constraints);
+              logger.debug('[Architect] Generating structure with constraints:', constraints);
               const ipcAPI = globalThis?.electronAPI?.invoke || globalThis?.ipc?.invoke;
               if (ipcAPI) {
                 const result = await ipcAPI('SANDBOX:GENERATE', constraints);
-                console.log('[Architect] SANDBOX:GENERATE result:', result);
+                logger.debug('[Architect] SANDBOX:GENERATE result:', result);
                 if (result?.success) {
                   setSandboxBlocks(result.blocks || []);
                   setBlocks(result.blocks || []);
@@ -428,13 +429,13 @@ export default function Architect() {
                   setSandboxBlocks(result.blocks);
                   setBlocks(result.blocks);
                 } else {
-                  console.warn('[Architect] SANDBOX:GENERATE returned no blocks:', result);
+                  logger.warn('[Architect] SANDBOX:GENERATE returned no blocks:', result);
                 }
               } else {
-                console.error('[Architect] No IPC API available');
+                logger.error('[Architect] No IPC API available');
               }
             } catch (error) {
-              console.error('[Architect] Error generating structure:', error);
+              logger.error('[Architect] Error generating structure:', error);
             }
           }}
           generatedBlocks={sandboxBlocks}

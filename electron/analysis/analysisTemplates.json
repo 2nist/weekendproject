@@ -1,0 +1,98 @@
+{
+  "version": "1.0",
+  "templates": {
+    "default": {
+      "name": "Balanced (Default)",
+      "description": "Balanced settings for most modern music",
+      "settings": {
+        "windowShift": 0,
+        "temperature": 0.1,
+        "transitionProb": 0.8,
+        "diatonicBonus": 0.1,
+        "nonDiatonicPenalty": 0.1,
+        "rootPeakBias": 0.1,
+        "rootOnly": true,
+        "mfccWeight": 0.5,
+        "bassWeight": 1.0
+      }
+    },
+    "jazz": {
+      "name": "Jazz / Complex Harmony",
+      "description": "For jazz, fusion, and harmonically complex music",
+      "settings": {
+        "windowShift": 0.2,
+        "temperature": 0.15,
+        "transitionProb": 0.7,
+        "diatonicBonus": 0.05,
+        "nonDiatonicPenalty": 0.05,
+        "rootPeakBias": 0.15,
+        "rootOnly": false,
+        "mfccWeight": 0.6,
+        "bassWeight": 0.8,
+        "include7ths": true
+      }
+    },
+    "rock": {
+      "name": "Rock / Pop",
+      "description": "For guitar-driven rock and pop with power chords",
+      "settings": {
+        "windowShift": -0.1,
+        "temperature": 0.08,
+        "transitionProb": 0.85,
+        "diatonicBonus": 0.15,
+        "nonDiatonicPenalty": 0.15,
+        "rootPeakBias": 0.2,
+        "rootOnly": true,
+        "mfccWeight": 0.4,
+        "bassWeight": 1.2
+      }
+    },
+    "classical": {
+      "name": "Classical / Orchestral",
+      "description": "For classical music with clear voice leading",
+      "settings": {
+        "windowShift": 0.3,
+        "temperature": 0.12,
+        "transitionProb": 0.75,
+        "diatonicBonus": 0.2,
+        "nonDiatonicPenalty": 0.2,
+        "rootPeakBias": 0.05,
+        "rootOnly": false,
+        "mfccWeight": 0.7,
+        "bassWeight": 0.9
+      }
+    },
+    "electronic": {
+      "name": "Electronic / EDM",
+      "description": "For electronic music with synthetic sounds",
+      "settings": {
+        "windowShift": -0.2,
+        "temperature": 0.1,
+        "transitionProb": 0.9,
+        "diatonicBonus": 0.12,
+        "nonDiatonicPenalty": 0.08,
+        "rootPeakBias": 0.15,
+        "rootOnly": true,
+        "mfccWeight": 0.3,
+        "bassWeight": 1.5
+      }
+    },
+    "acoustic": {
+      "name": "Acoustic / Folk",
+      "description": "For acoustic instruments and folk music",
+      "settings": {
+        "windowShift": 0.1,
+        "temperature": 0.09,
+        "transitionProb": 0.85,
+        "diatonicBonus": 0.18,
+        "nonDiatonicPenalty": 0.12,
+        "rootPeakBias": 0.12,
+        "rootOnly": true,
+        "mfccWeight": 0.55,
+        "bassWeight": 0.7
+      }
+    }
+  },
+  "customTemplates": {}
+}
+

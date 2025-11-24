@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const logger = require('./logger');
 
 // Try to load TypeScript benchmark script
 let benchmarkScript = null;
@@ -17,7 +18,7 @@ try {
     benchmarkScript = require(benchmarkPath);
   }
 } catch (err) {
-  console.warn('Could not load benchmark script:', err.message);
+  logger.warn('Could not load benchmark script:', err.message);
 }
 
 const ROOT = path.resolve(__dirname, '../..');
@@ -87,7 +88,8 @@ const SONGS = [
     referenceKey: 'E:min',
   },
   {
-    id: 'maxwell',
+      const logger = logger || require('./logger');
+      logger.warn('[getBenchmarks] getAllSongs() returned empty array!');
     title: "Maxwell's Silver Hammer",
     audioPath: path.join(TEST_DIR, "03 Maxwell's Silver Hammer.mp3"),
     sectionPath: path.join(TEST_DIR, "03_-_Maxwell's_Silver_Hammer.lab"),
@@ -315,7 +317,7 @@ async function runCalibration(sendProgress) {
         result,
       });
     } catch (error) {
-      console.error(`Failed to analyze "${song.title}":`, error);
+      logger.error(`Failed to analyze "${song.title}":`, error);
       results.push({
         songId: song.id,
         title: song.title,

@@ -2,6 +2,7 @@ const electron = require('electron');
 const path = require('path');
 const fs = require('fs');
 const db = require('./db');
+const logger = require('./analysis/logger');
 const midiListener = require('./midiListener');
 const trackResolver = require('./trackResolver');
 const oscBuilder = require('./oscBuilder');
@@ -16,9 +17,9 @@ const architect = require('./analysis/architect_canonical_final');
 let architectV2 = null;
 try {
   architectV2 = require('./analysis/architect_v2');
-  console.log('Architect V2 loaded successfully');
+  logger.info('Architect V2 loaded successfully');
 } catch (e) {
-  console.warn('Architect V2 not available, falling back to clean version:', e.message);
+  logger.warn('Architect V2 not available, falling back to clean version:', e.message);
 }
 const theorist = require('./analysis/theorist');
 // Engine Config (calibrated parameters)
@@ -27,12 +28,12 @@ try {
   require('ts-node').register({ transpileOnly: true });
   const ec = require('./config/engineConfig.ts');
   engineConfig = ec;
-  console.log('EngineConfig loaded successfully');
+  logger.info('EngineConfig loaded successfully');
 } catch (e) {
   try {
     engineConfig = require('./config/engineConfig');
   } catch (e2) {
-    console.warn('EngineConfig not available:', e2?.message || e?.message);
+    logger.warn('EngineConfig not available:', e2?.message || e?.message);
   }
 }
 // Calibration Service - lazy load helper
@@ -58,30 +59,30 @@ function loadCalibrationService() {
     } else {
       calibrationService = cs;
     }
-    console.log('CalibrationService loaded successfully');
-    console.log('CalibrationService type:', typeof calibrationService);
-    console.log(
+    logger.info('CalibrationService loaded successfully');
+    logger.debug('CalibrationService type:', typeof calibrationService);
+    logger.debug(
       'CalibrationService methods:',
       calibrationService ? Object.keys(calibrationService) : 'null',
     );
     if (calibrationService) {
-      console.log('getBenchmarks:', typeof calibrationService.getBenchmarks);
-      console.log('runCalibration:', typeof calibrationService.runCalibration);
+      logger.debug('getBenchmarks:', typeof calibrationService.getBenchmarks);
+      logger.debug('runCalibration:', typeof calibrationService.runCalibration);
     }
     return calibrationService;
   } catch (err) {
-    console.error('Failed to load CalibrationService (TS):', err?.message || err);
-    console.error('Stack:', err?.stack);
+    logger.error('Failed to load CalibrationService (TS):', err?.message || err);
+    logger.debug('Stack:', err?.stack);
     try {
       const cs = require('./services/calibration');
       calibrationService = cs && cs.default ? cs.default : cs;
       if (calibrationService) {
-        console.log('CalibrationService loaded (JS fallback)');
+        logger.info('CalibrationService loaded (JS fallback)');
       }
       return calibrationService;
     } catch (e2) {
-      console.warn('CalibrationService not available:', e2?.message || e2);
-      console.warn('Stack:', e2?.stack);
+      logger.warn('CalibrationService not available:', e2?.message || e2);
+      logger.debug('Stack:', e2?.stack);
       return null;
     }
   }
@@ -92,24 +93,52 @@ let calibrationService = null;
 try {
   calibrationService = loadCalibrationService();
 } catch (e) {
-  console.warn('CalibrationService initial load failed, will try lazy load:', e.message);
+  logger.warn('CalibrationService initial load failed, will try lazy load:', e.message);
 }
 const fileProcessor = require('./analysis/fileProcessor');
 const progressTracker = require('./analysis/progressTracker');
 const genreProfiles = require('./analysis/genreProfiles');
 const structureGenerator = require('./analysis/structureGenerator');
-// Midi parser
+// Midi parser - lazy load as ES Module
 let midiParser = null;
-try {
-  // Prefer TS version in dev
-  try {
-    require('ts-node').register({ transpileOnly: true });
-  } catch (e) {}
-  const mpTS = require('./analysis/midiParser.ts');
-  midiParser = mpTS && mpTS.default ? mpTS.default : mpTS;
-} catch (err) {
-  const mpJS = require('./analysis/midiParser');
-  midiParser = mpJS && mpJS.default ? mpJS.default : mpJS;
+let midiParserLoading = null;
+
+async function ensureMidiParser() {
+  if (midiParser) return midiParser;
+  if (midiParserLoading) return midiParserLoading;
+
+  midiParserLoading = (async () => {
+    try {
+      // Prefer TS version in dev - use dynamic import for ES modules
+      try {
+        require('ts-node').register({ transpileOnly: true });
+      } catch (e) {}
+      const mpTS = await import('./analysis/midiParser.ts');
+      if (mpTS.parseMidiFileToLinear) {
+        midiParser = { parseMidiFileToLinear: mpTS.parseMidiFileToLinear };
+      } else if (mpTS.default) {
+        midiParser = mpTS.default;
+      } else {
+        midiParser = mpTS;
+      }
+      logger.info('MidiParser (TS) loaded successfully');
+      return midiParser;
+    } catch (err) {
+      try {
+        const mpJS = require('./analysis/midiParser');
+        midiParser = mpJS && mpJS.default ? mpJS.default : mpJS;
+        logger.info('MidiParser (JS fallback) loaded successfully');
+        return midiParser;
+      } catch (e2) {
+        logger.warn('MidiParser not available:', e2?.message || err?.message);
+        return null;
+      }
+    } finally {
+      midiParserLoading = null;
+    }
+  })();
+
+  return midiParserLoading;
 }
 // Downloader bridge
 const downloaderBridge = require('./bridges/downloader');
@@ -121,25 +150,38 @@ try {
   } catch (e) {}
   const libTS = require('./services/library.ts');
   libraryService = libTS && libTS.default ? libTS.default : libTS;
-  console.log('[MAIN] Library service loaded (TypeScript)');
+  logger.info('[MAIN] Library service loaded (TypeScript)');
 } catch (err) {
   try {
     const libJS = require('./services/library');
     libraryService = libJS && libJS.default ? libJS.default : libJS;
-    console.log('[MAIN] Library service loaded (JavaScript)');
+    logger.info('[MAIN] Library service loaded (JavaScript)');
   } catch (err2) {
-    console.error('[MAIN] Failed to load library service:', err2.message);
+    logger.error('[MAIN] Failed to load library service:', err2.message);
     libraryService = null;
   }
 }
 
 if (!libraryService) {
-  console.warn('[MAIN] Library service is null - library features may not work');
+  logger.warn('[MAIN] Library service is null - library features may not work');
 }
 
 const app = electron.app;
 const BrowserWindow = electron.BrowserWindow;
 const ipcMain = electron.ipcMain;
+
+// Register schemes as privileged to enable media streaming and fetch API support.
+try {
+  // This must be called before app.whenReady()
+  const { protocol } = electron;
+  protocol.registerSchemesAsPrivileged([
+    { scheme: 'app', privileges: { secure: true, supportFetchAPI: true, stream: true } },
+    { scheme: 'media', privileges: { secure: true, supportFetchAPI: true, stream: true } },
+  ]);
+  logger.info('[MAIN] Registered privileged schemes: app, media');
+} catch (e) {
+  logger.warn('[MAIN] registerSchemesAsPrivileged unavailable or failed:', e?.message || e);
+}
 
 // Safe IPC registration helper - removes any existing handler first.
 function registerIpcHandler(channel, handler) {
@@ -213,7 +255,7 @@ function createWindow() {
   // Reset did-finish-load counter when we create a new window
   didFinishLoadCount = 0;
   lastDidFinishLoadTs = Date.now();
-  console.log('[MAIN] Created mainWindow at', new Date().toISOString());
+  logger.info('[MAIN] Created mainWindow at', new Date().toISOString());
 
   if (app.isPackaged || process.env.NODE_ENV === 'production') {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
@@ -237,7 +279,7 @@ function createWindow() {
           mainWindow.webContents.openDevTools({ mode: 'detach' });
 
           mainWindow.webContents.once('devtools-opened', () => {
-            console.log('[MAIN] DevTools opened - configuring to prevent auto-reload');
+            logger.debug('[MAIN] DevTools opened - configuring to prevent auto-reload');
           });
         } else if (attempts < maxRetries) {
           setTimeout(tryLoad, retryInterval);
@@ -275,7 +317,7 @@ function createWindow() {
 
   // Ensure we properly null the mainWindow reference when it's closed
   mainWindow.on('closed', () => {
-    console.log('[MAIN] mainWindow closed');
+    logger.info('[MAIN] mainWindow closed');
     try {
       mainWindow = null;
     } catch (e) {}
@@ -283,7 +325,7 @@ function createWindow() {
 
   // Handle renderer process exits (crashes or kills) gracefully and log details
   mainWindow.webContents.on('render-process-gone', (event, details) => {
-    console.error('[MAIN] Renderer process gone:', details);
+    logger.error('[MAIN] Renderer process gone:', details);
     // Do not auto-reload the window - instead log and notify dev
     if (details.reason === 'crashed' || details.reason === 'killed') {
       broadcastLog(
@@ -294,12 +336,12 @@ function createWindow() {
 
   // Forward renderer console messages to main process logs for debugging reload causes
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
-    console.log(`[RENDER] (${level}) ${message} (line:${line} src:${sourceId})`);
+    logger.debug(`[RENDER] (${level}) ${message} (line:${line} src:${sourceId})`);
   });
 
   // Optional - log when the window is unresponsive to help diagnose reloads
   mainWindow.on('unresponsive', () => {
-    console.warn('[MAIN] Window unresponsive');
+    logger.warn('[MAIN] Window unresponsive');
   });
 }
 
@@ -312,7 +354,7 @@ function broadcastStatus() {
 // Helper function to broadcast logs to frontend DevTools console
 function broadcastLog(message) {
   // Log to terminal (standard console output)
-  console.log(message);
+  logger.info(message);
 
   // Send to renderer process (DevTools console)
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -326,66 +368,199 @@ function broadcastLog(message) {
 }
 
 app.whenReady().then(async () => {
-  // Register custom media protocol for secure audio file serving
+  // Initialize DB early to ensure protocol handlers can use it
+  try {
+    await db.init(app);
+  } catch (err) {
+    logger.error('[MAIN] Failed to initialize DB at startup:', err?.message || err);
+  }
+
+  // Register custom audio protocol for secure audio file serving
   const { protocol } = require('electron');
-  console.log('[MAIN] Registering media protocol...');
-  protocol.registerFileProtocol('media', (request, callback) => {
-    console.log('[MEDIA PROTOCOL] Request:', request.url);
-    const url = request.url.replace('media://', '');
-    // URL format: media://project-id/song.mp3
-    const parts = url.split('/');
-    if (parts.length < 2) {
-      console.warn('[MEDIA PROTOCOL] Invalid URL format:', url);
-      callback({ error: -6 }); // FILE_NOT_FOUND
-      return;
-    }
+  logger.info('[MAIN] Registering audio protocol...');
 
-    const projectId = parts[0];
-    const filename = parts.slice(1).join('/');
-    console.log('[MEDIA PROTOCOL] Project ID:', projectId, 'Filename:', filename);
-
+  // Use app:// protocol which has better Chromium support
+  protocol.registerStreamProtocol('app', async (request, callback) => {
     try {
-      // Try to get the actual audio_path from the project in the database
-      const database = db.getDb();
-      let audioPath = null;
-      
-      if (database) {
+      logger.info('[APP PROTOCOL] ===== NEW REQUEST =====');
+      logger.debug('[APP PROTOCOL] Request URL:', request.url);
+      let url = request.url.replace('app://', '');
+      url = decodeURIComponent(url);
+      if (process.platform === 'win32') url = url.replace(/^\/+/, '');
+      if (/^[A-Za-z]\//.test(url)) url = url[0] + ':/' + url.slice(2);
+      logger.debug('[APP PROTOCOL] Decoded URL:', url);
+
+      const serveFile = (filePath) => {
+        try {
+          if (!fs.existsSync(filePath)) return false;
+          const res = protocolHelpers.createStreamResponse(filePath, request.headers || {});
+          callback({ statusCode: res.statusCode, headers: res.headers, data: res.stream });
+          return true;
+        } catch (e) {
+          logger.error('[APP PROTOCOL] serveFile error:', e?.message || e);
+          return false;
+        }
+      };
+
+      // Strategy 1: Direct file path
+      if (url.includes(':') || url.startsWith('/')) {
+        if (serveFile(url)) return;
+        callback({ statusCode: 404, data: null });
+        return;
+      }
+
+      let database = db.getDb();
+      if (!database) {
+        logger.warn('[APP PROTOCOL] Database not initialized; attempting to initialize');
+        try {
+          await db.init(app);
+          database = db.getDb();
+        } catch (err) {
+          logger.error('[APP PROTOCOL] Failed to initialize DB in handler:', err?.message || err);
+        }
+      }
+      if (!database) {
+        logger.error('[APP PROTOCOL] ❌ Database not available after init');
+        callback({ statusCode: 500, data: null });
+        return;
+      }
+
+      // Strategy 2: Lookup by fileHash in AudioAnalysis table
+      try {
+        const analysisStmt = database.prepare(
+          'SELECT file_path FROM AudioAnalysis WHERE file_hash = ?',
+        );
+        analysisStmt.bind([url]);
+        if (analysisStmt.step()) {
+          const row = analysisStmt.getAsObject();
+          const audioPath = row.file_path;
+          logger.debug('[APP PROTOCOL] [Strategy 2] Found in AudioAnalysis table:', audioPath);
+          analysisStmt.free();
+          if (audioPath && serveFile(audioPath)) return;
+        }
+        analysisStmt.free();
+      } catch (dbErr) {
+        logger.warn(
+          '[APP PROTOCOL] [Strategy 2] AudioAnalysis table lookup failed:',
+          dbErr.message,
+        );
+      }
+
+      // Strategy 3: Project-based format (app://project-id/song.mp3)
+      const parts = url.split('/');
+      if (parts.length >= 2) {
+        const projectId = parts[0];
+        const filename = parts.slice(1).join('/');
         try {
           const projectStmt = database.prepare('SELECT audio_path FROM Projects WHERE id = ?');
           projectStmt.bind([projectId]);
           if (projectStmt.step()) {
             const row = projectStmt.getAsObject();
-            audioPath = row.audio_path;
+            const audioPath = row.audio_path;
+            projectStmt.free();
+            if (audioPath && serveFile(audioPath)) return;
           }
           projectStmt.free();
         } catch (dbErr) {
-          console.warn('[MEDIA PROTOCOL] Database lookup failed:', dbErr);
+          logger.warn('[APP PROTOCOL] [Strategy 3] Projects table lookup failed:', dbErr.message);
         }
       }
-      
-      // Fallback: try to resolve from filename in library/audio directory
-      if (!audioPath || !fs.existsSync(audioPath)) {
-        const userDataPath = app.getPath('userData');
-        audioPath = path.join(userDataPath, 'library', 'audio', filename);
-      }
-      
-      console.log('[MEDIA PROTOCOL] Resolved path:', audioPath);
 
-      // Verify file exists
-      if (fs.existsSync(audioPath)) {
-        console.log('[MEDIA PROTOCOL] File found, serving:', audioPath);
-        callback({ path: audioPath });
-      } else {
-        console.warn('[MEDIA PROTOCOL] File not found:', audioPath);
-        callback({ error: -6 }); // FILE_NOT_FOUND
+      // Strategy 4: Fallback to library/audio directory
+      if (parts.length >= 2) {
+        const filename = parts.slice(1).join('/');
+        const userDataPath = app.getPath('userData');
+        const audioPath = path.join(userDataPath, 'library', 'audio', filename);
+        logger.debug('[APP PROTOCOL] [Strategy 4] Library fallback path:', audioPath);
+        if (serveFile(audioPath)) return;
       }
-    } catch (error) {
-      console.error('[MEDIA PROTOCOL] Error:', error);
-      callback({ error: -2 }); // FAILED
+
+      // All strategies failed
+      logger.error('[APP PROTOCOL] ❌ ALL STRATEGIES FAILED - Could not resolve:', url);
+      callback({ statusCode: 404, data: null });
+    } catch (err) {
+      logger.error('[APP PROTOCOL] handler error:', err?.message || err);
+      callback({ statusCode: 500, data: null });
     }
   });
 
-  await db.init(app);
+  // Register media:// protocol for direct file path access
+  protocol.registerStreamProtocol('media', async (request, callback) => {
+    try {
+      logger.info('[MEDIA PROTOCOL] ===== NEW REQUEST =====');
+      logger.debug('[MEDIA PROTOCOL] Request URL:', request.url);
+
+      let filePath = request.url.replace('media://', '');
+      filePath = decodeURIComponent(filePath);
+      if (process.platform === 'win32') {
+        filePath = filePath.replace(/^\/+/, '');
+        if (/^[A-Za-z]\//.test(filePath)) {
+          filePath = filePath[0] + ':/' + filePath.slice(2);
+          logger.debug('[MEDIA PROTOCOL] Normalized Windows path:', filePath);
+        }
+      }
+
+      if (!fs.existsSync(filePath)) {
+        logger.error('[MEDIA PROTOCOL] ❌ FAILED - File not found:', filePath);
+        callback({ statusCode: 404, data: null });
+        return;
+      }
+
+      const stat = fs.statSync(filePath);
+      const total = stat.size;
+      const ext = path.extname(filePath).toLowerCase().replace('.', '');
+      const mimeTypes = {
+        mp3: 'audio/mpeg',
+        m4a: 'audio/mp4',
+        mp4: 'video/mp4',
+        wav: 'audio/wav',
+        ogg: 'audio/ogg',
+        flac: 'audio/flac',
+        webm: 'audio/webm',
+      };
+      const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+      const rangeHeader = request.headers && (request.headers.Range || request.headers.range);
+      if (rangeHeader) {
+        const matches = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
+        if (matches) {
+          const start = Number(matches[1]);
+          const end = matches[2] ? Number(matches[2]) : total - 1;
+          const chunkSize = end - start + 1;
+          logger.debug('[MEDIA PROTOCOL] Partial content requested:', start, end, 'total:', total);
+          const stream = fs.createReadStream(filePath, { start, end });
+          callback({
+            statusCode: 206,
+            headers: {
+              'Content-Type': contentType,
+              'Content-Range': `bytes ${start}-${end}/${total}`,
+              'Accept-Ranges': 'bytes',
+              'Content-Length': String(chunkSize),
+            },
+            data: stream,
+          });
+          return;
+        }
+      }
+
+      // Full content
+      const stream = fs.createReadStream(filePath);
+      callback({
+        statusCode: 200,
+        headers: {
+          'Content-Type': contentType,
+          'Content-Length': String(total),
+          'Accept-Ranges': 'bytes',
+        },
+        data: stream,
+      });
+    } catch (err) {
+      logger.error('[MEDIA PROTOCOL] handler error:', err?.message || err);
+      callback({ statusCode: 500, data: null });
+    }
+  });
+
+  // DB already initialized earlier in app.whenReady
 
   let settings = db.getSettings();
   if (Object.keys(settings).length === 0) {
@@ -431,12 +606,12 @@ app.whenReady().then(async () => {
           semantic_signature: section.semantic_signature || {},
         };
       });
-      console.log(`Restored ${currentBlocks.length} blocks from last analysis on startup`);
+      logger.info(`Restored ${currentBlocks.length} blocks from last analysis on startup`);
     } else {
-      console.log('No previous analysis found to restore');
+      logger.info('No previous analysis found to restore');
     }
   } catch (error) {
-    console.warn('Failed to restore last analysis:', error.message);
+    logger.warn('Failed to restore last analysis:', error.message);
   }
 
   const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
@@ -450,6 +625,7 @@ app.whenReady().then(async () => {
           "script-src 'self' 'unsafe-eval' 'unsafe-inline' blob:;",
           "connect-src 'self' ws:;",
           "worker-src 'self' blob:;",
+          "media-src 'self' media: data: blob: app:;",
         ].join(' '),
       },
     });
@@ -502,18 +678,18 @@ app.whenReady().then(async () => {
             if (!filename) return;
             if (shouldIgnore(p, filename)) return;
             const full = pathModule.join(p, filename);
-            console.log(`[DEV WATCHER] ${eventType} ${full}`);
+            logger.debug(`[DEV WATCHER] ${eventType} ${full}`);
           });
         } catch (err) {
-          console.warn('[MAIN] Dev watcher unable to watch', p, err?.message || err);
+          logger.warn('[MAIN] Dev watcher unable to watch', p, err?.message || err);
         }
       }
-      console.log('[MAIN] Dev file watcher ENABLED');
+      logger.info('[MAIN] Dev file watcher ENABLED');
     } catch (e) {
-      console.warn('[MAIN] Dev file watcher failed to initialize:', e?.message || e);
+      logger.warn('[MAIN] Dev file watcher failed to initialize:', e?.message || e);
     }
   } else {
-    console.log('[MAIN] Dev file watcher DISABLED');
+    logger.info('[MAIN] Dev file watcher DISABLED');
   }
 
   // Proactively push current blocks to newly created renderer to avoid 'UI:REQUEST_INITIAL' spam
@@ -526,9 +702,9 @@ app.whenReady().then(async () => {
       }
       didFinishLoadCount++;
       lastDidFinishLoadTs = now;
-      console.log(`[MAIN] did-finish-load #${didFinishLoadCount}`);
+      logger.info(`[MAIN] did-finish-load #${didFinishLoadCount}`);
       if (didFinishLoadCount > DID_FINISH_LOAD_MAX) {
-        console.error(
+        logger.error(
           '[MAIN] Too many did-finish-load events detected - ignoring event to prevent loop.',
         );
         return;
@@ -537,34 +713,34 @@ app.whenReady().then(async () => {
       // Only proactively push blocks on the initial load for this window
       if (didFinishLoadCount === 1 && currentBlocks && currentBlocks.length > 0) {
         const completeBlocks = currentBlocks.map(ensureBlockData);
-        console.log(
+        logger.debug(
           'UI:INIT: Pushing stored blocks to renderer on did-finish-load:',
           completeBlocks.length,
         );
         try {
           mainWindow.webContents.send('UI:BLOCKS_UPDATE', completeBlocks);
         } catch (err) {
-          console.warn('UI:INIT: Failed to send blocks on did-finish-load', err?.message || err);
+          logger.warn('UI:INIT: Failed to send blocks on did-finish-load', err?.message || err);
         }
       }
     });
 
     // Add navigation listeners to diagnose reload cause
     mainWindow.webContents.on('will-navigate', (event, url) => {
-      console.log(`[MAIN] will-navigate to: ${url}`);
+      logger.debug(`[MAIN] will-navigate to: ${url}`);
       // Only block DevTools-initiated reloads, allow user navigation
       if (url === devUrl && event.sender.getURL() === devUrl) {
-        console.log('[MAIN] Blocking DevTools auto-reload');
+        logger.debug('[MAIN] Blocking DevTools auto-reload');
         event.preventDefault();
       }
     });
 
     mainWindow.webContents.on('did-navigate', (event, url) => {
-      console.log(`[MAIN] did-navigate to: ${url}`);
+      logger.debug(`[MAIN] did-navigate to: ${url}`);
     });
 
     mainWindow.webContents.on('did-navigate-in-page', (event, url, isMainFrame) => {
-      console.log(`[MAIN] did-navigate-in-page to: ${url}, isMainFrame: ${isMainFrame}`);
+      logger.debug(`[MAIN] did-navigate-in-page to: ${url}, isMainFrame: ${isMainFrame}`);
     });
   }
 
@@ -587,7 +763,7 @@ app.whenReady().then(async () => {
 // Downloader Handler: spawn Python downloader and return result JSON
 registerIpcHandler('DOWNLOADER:DOWNLOAD', async (event, url) => {
   try {
-    console.log('DOWNLOADER: Starting download for', url);
+    logger.info('DOWNLOADER: Starting download for', url);
     const res = await downloaderBridge.spawnDownload(url, null, (p) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         try {
@@ -595,15 +771,15 @@ registerIpcHandler('DOWNLOADER:DOWNLOAD', async (event, url) => {
         } catch (_) {}
       }
       if (p.percent !== undefined) {
-        console.log(`DOWNLOADER: ${p.status} ${p.percent.toFixed(2)}%`);
+        logger.debug(`DOWNLOADER: ${p.status} ${p.percent.toFixed(2)}%`);
       } else {
-        console.log(`DOWNLOADER: status=${p.status}`);
+        logger.debug(`DOWNLOADER: status=${p.status}`);
       }
     });
-    console.log('DOWNLOADER: Success', res);
+    logger.info('DOWNLOADER: Success', res);
     return { success: true, path: res.path, title: res.title };
   } catch (err) {
-    console.error('DOWNLOADER: Failed', err?.message || err);
+    logger.error('DOWNLOADER: Failed', err?.message || err);
     return { success: false, error: err.message || String(err) };
   }
 });
@@ -622,17 +798,17 @@ registerIpcHandler('LIBRARY:CREATE_PROJECT', async (event, payload) => {
 registerIpcHandler('LIBRARY:GET_PROJECTS', async () => {
   try {
     if (!libraryService) {
-      console.error('[LIBRARY:GET_PROJECTS] Library service not initialized');
+      logger.error('[LIBRARY:GET_PROJECTS] Library service not initialized');
       return { success: false, error: 'Library service not available', projects: [] };
     }
     if (!libraryService.getAllProjects) {
-      console.error('[LIBRARY:GET_PROJECTS] getAllProjects method not found');
+      logger.error('[LIBRARY:GET_PROJECTS] getAllProjects method not found');
       return { success: false, error: 'Library service method not available', projects: [] };
     }
     const projects = libraryService.getAllProjects();
     return { success: true, projects: projects || [] };
   } catch (error) {
-    console.error('[LIBRARY:GET_PROJECTS] Error:', error);
+    logger.error('[LIBRARY:GET_PROJECTS] Error:', error);
     return { success: false, error: error.message || String(error), projects: [] };
   }
 });
@@ -727,9 +903,11 @@ registerIpcHandler('LIBRARY:PARSE_MIDI', async (event, { projectId, midiPath }) 
     if (!projectId || !midiPath) throw new Error('Missing parameters');
     if (!libraryService || !libraryService.parseMidiAndSaveForProject) {
       // Fallback: use midiParser directly and save
-      const res = midiParser.parseMidiToLinearAnalysis
-        ? midiParser.parseMidiToLinearAnalysis(midiPath)
-        : await midiParser.parseMidiFileToLinear(midiPath);
+      const parser = await ensureMidiParser();
+      if (!parser) throw new Error('MidiParser not available');
+      const res = parser.parseMidiToLinearAnalysis
+        ? parser.parseMidiToLinearAnalysis(midiPath)
+        : await parser.parseMidiFileToLinear(midiPath);
       if (!res || !res.linear_analysis) throw new Error('MIDI parsing failed');
       const metadata = res.linear_analysis.metadata || {};
       const fileHash = `midi-${Date.now()}`;
@@ -774,7 +952,7 @@ registerIpcHandler('DB:GET_SETTINGS', async (event) => {
     const settings = db.getSettings();
     return { success: true, settings: settings || {} };
   } catch (error) {
-    console.error('Error getting settings:', error);
+    logger.error('Error getting settings:', error);
     return { success: false, error: error.message };
   }
 });
@@ -794,7 +972,7 @@ registerIpcHandler('DB:SET_SETTING', async (event, { key, value }) => {
     }
     return result;
   } catch (error) {
-    console.error('Error setting setting:', error);
+    logger.error('Error setting setting:', error);
     return { success: false, error: error.message };
   }
 });
@@ -823,7 +1001,7 @@ ipcMain.on('NETWORK:SEND_MACRO', (event, { macro, payload }) => {
     broadcastStatus();
   } else {
     if (!payload || !payload.macroId) {
-      console.error('Invalid payload for NETWORK:SEND_MACRO');
+      logger.error('Invalid payload for NETWORK:SEND_MACRO');
       return;
     }
     sendMacro(payload.macroId);
@@ -850,7 +1028,7 @@ ipcMain.on('UI:REQUEST_INITIAL', (event) => {
   // Send current blocks if any exist, ensuring they have complete data
   if (currentBlocks.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
     const completeBlocks = currentBlocks.map(ensureBlockData);
-    console.log('UI:REQUEST_INITIAL: Sending', completeBlocks.length, 'existing blocks');
+    logger.debug('UI:REQUEST_INITIAL: Sending', completeBlocks.length, 'existing blocks');
     mainWindow.webContents.send('UI:BLOCKS_UPDATE', completeBlocks);
     // Only broadcast status if we actually sent blocks
     broadcastStatus();
@@ -890,7 +1068,7 @@ registerIpcHandler('DIALOG:SHOW_OPEN', async (event, options = {}) => {
 
     return { canceled: false, filePaths: result.filePaths || [] };
   } catch (error) {
-    console.error('Error in DIALOG:SHOW_OPEN:', error);
+    logger.error('Error in DIALOG:SHOW_OPEN:', error);
     return { canceled: true, filePaths: [], error: error.message };
   }
 });
@@ -898,8 +1076,8 @@ registerIpcHandler('DIALOG:SHOW_OPEN', async (event, options = {}) => {
 // Helper: start full analysis (used by ANALYSIS:START and by LIBRARY:RE_ANALYZE)
 async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
   const startTime = Date.now();
-  console.log('=== startFullAnalysis START ===');
-  console.log('File path:', filePath);
+  logger.info('=== startFullAnalysis START ===');
+  logger.info('File path:', filePath);
   try {
     // Validate and run the same code path as ANALYSIS:START
     const fs = require('fs');
@@ -913,9 +1091,9 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
     if (engineConfig && engineConfig.loadConfig) {
       try {
         engineConfigData = engineConfig.loadConfig();
-        console.log('Loaded calibrated engine config');
+        logger.info('Loaded calibrated engine config');
       } catch (e) {
-        console.warn('Failed to load engine config, using defaults:', e.message);
+        logger.warn('Failed to load engine config, using defaults:', e.message);
       }
     }
 
@@ -1015,6 +1193,16 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
     if (!result || !result.linear_analysis) throw new Error('Pass 1 returned invalid result');
 
     const linear_analysis = result.linear_analysis;
+    // Ensure metadata includes ID3 tags (artist, title) for lyrics display
+    if (metadata.title && !linear_analysis.metadata.title) {
+      linear_analysis.metadata.title = metadata.title;
+    }
+    if (metadata.artist && !linear_analysis.metadata.artist) {
+      linear_analysis.metadata.artist = metadata.artist;
+    }
+    if (metadata.album && !linear_analysis.metadata.album) {
+      linear_analysis.metadata.album = metadata.album;
+    }
     session.setResult('pass1', linear_analysis);
     // color intentionally omitted; UI controls theme mapping
     tracker.broadcast();
@@ -1041,7 +1229,7 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
       progressionSimilarityMode: 'normalized',
       minSectionsStop: 20,
     };
-    console.log('Applying Architect Config from Analysis Lab:', architectOptions);
+    logger.debug('Applying Architect Config from Analysis Lab:', architectOptions);
 
     // Map to V2 adaptive parameters
     const computeScaleWeights = (detailLevel) => {
@@ -1062,7 +1250,7 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
     // V2 enabled by default when available; set USE_ARCHITECT_V2=0 to force legacy
     const useV2 = !!architectV2 && process.env.USE_ARCHITECT_V2 !== '0';
     const architectVersion = useV2 ? 'V2 (Multi-Scale + Adaptive)' : 'V1 (Canonical)';
-    console.log(
+    logger.debug(
       `Using Architect ${architectVersion}${process.env.USE_ARCHITECT_V2 === '0' ? ' (forced via USE_ARCHITECT_V2=0)' : ''}`,
     );
     const structural_map = await (
@@ -1070,7 +1258,7 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
     )(
       linear_analysis,
       (p) => {
-        tracker.update('pass2', p.progress || p);
+        tracker.update('pass2', typeof p === 'object' && p.progress !== undefined ? p.progress : p);
         tracker.broadcast();
       },
       useV2 ? v2Options : architectOptions,
@@ -1134,6 +1322,7 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
     };
 
     // Save analysis (CRITICAL: Use corrected_structural_map from Pass 3, not original structural_map)
+    logger.info('Saving analysis with file_path:', filePath);
     const analysisId = db.saveAnalysis({
       file_path: filePath,
       file_hash: fileHash,
@@ -1144,6 +1333,7 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
       harmonic_context,
       polyrhythmic_layers: [],
     });
+    logger.info('Analysis saved with ID:', analysisId, 'file_path:', filePath);
     if (projectId && analysisId) {
       const database = db.getDb();
       database &&
@@ -1153,12 +1343,12 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
 
     tracker.complete();
     const endTime = Date.now();
-    console.log(
+    logger.info(
       `=== startFullAnalysis COMPLETE (${((endTime - startTime) / 1000).toFixed(2)}s) ===`,
     );
     return { success: true, analysisId, fileHash };
   } catch (err) {
-    console.error('startFullAnalysis error:', err);
+    logger.error('startFullAnalysis error:', err);
     return { success: false, error: err.message || String(err) };
   }
 }
@@ -1178,15 +1368,17 @@ registerIpcHandler('ANALYSIS:GET_STATUS', async (event, fileHash) => {
 });
 
 registerIpcHandler('ANALYSIS:GET_RESULT', async (event, fileHash) => {
-  console.log('IPC: ANALYSIS:GET_RESULT called for fileHash:', fileHash);
+  logger.debug('IPC: ANALYSIS:GET_RESULT called for fileHash:', fileHash);
 
   // Check preview cache first (for uncommitted changes)
   if (previewAnalysisCache.has(fileHash)) {
     const cached = previewAnalysisCache.get(fileHash);
-    console.log('IPC: Returning cached preview analysis with:', {
+    logger.debug('IPC: Returning cached preview analysis with:', {
       id: cached.id,
       hasLinearAnalysis: !!cached.linear_analysis,
       hasStructuralMap: !!cached.structural_map,
+      hasFilePath: !!cached.file_path,
+      filePath: cached.file_path,
       sectionCount: cached.structural_map?.sections?.length || 0,
       eventCount: cached.linear_analysis?.events?.length || 0,
       source: 'preview_cache',
@@ -1194,35 +1386,153 @@ registerIpcHandler('ANALYSIS:GET_RESULT', async (event, fileHash) => {
     return cached;
   }
 
-  // Otherwise, read from database
+  // Otherwise, read from database - but exclude large arrays for performance
   const analysis = db.getAnalysis(fileHash);
 
   if (analysis) {
-    console.log('IPC: Returning analysis with:', {
+    // Create a lightweight version excluding large arrays
+    const lightweightAnalysis = {
+      ...analysis,
+      linear_analysis: analysis.linear_analysis
+        ? {
+            ...analysis.linear_analysis,
+            // Exclude large arrays - they can be fetched separately
+            chroma_frames: undefined,
+            mfcc_frames: undefined,
+            events: analysis.linear_analysis.events?.slice(0, 100) || [], // Include first 100 events for UI
+            _hasLargeArrays: true, // Flag indicating lazy loading is available
+          }
+        : undefined,
+    };
+
+    logger.debug('IPC: Returning lightweight analysis with:', {
       id: analysis.id,
       hasLinearAnalysis: !!analysis.linear_analysis,
       hasStructuralMap: !!analysis.structural_map,
+      hasFilePath: !!analysis.file_path,
+      filePath: analysis.file_path,
       sectionCount: analysis.structural_map?.sections?.length || 0,
       eventCount: analysis.linear_analysis?.events?.length || 0,
-      source: 'database',
+      source: 'database (lightweight)',
     });
   } else {
-    console.warn('IPC: No analysis found for fileHash:', fileHash);
+    logger.warn('IPC: No analysis found for fileHash:', fileHash);
   }
 
   return analysis;
 });
 
-registerIpcHandler('LYRICS:GET', async (event, { artist, title }) => {
+// Lazy loading handlers for large analysis data
+registerIpcHandler('ANALYSIS:GET_CHROMA_FRAMES', async (event, fileHash) => {
+  logger.debug('IPC: ANALYSIS:GET_CHROMA_FRAMES called for fileHash:', fileHash);
+
+  // Check preview cache first
+  if (previewAnalysisCache.has(fileHash)) {
+    const cached = previewAnalysisCache.get(fileHash);
+    return cached?.linear_analysis?.chroma_frames || [];
+  }
+
+  // Get from database
+  const analysis = db.getAnalysis(fileHash);
+  return analysis?.linear_analysis?.chroma_frames || [];
+});
+
+registerIpcHandler('ANALYSIS:GET_MFCC_FRAMES', async (event, fileHash) => {
+  logger.debug('IPC: ANALYSIS:GET_MFCC_FRAMES called for fileHash:', fileHash);
+
+  // Check preview cache first
+  if (previewAnalysisCache.has(fileHash)) {
+    const cached = previewAnalysisCache.get(fileHash);
+    return cached?.linear_analysis?.mfcc_frames || [];
+  }
+
+  // Get from database
+  const analysis = db.getAnalysis(fileHash);
+  return analysis?.linear_analysis?.mfcc_frames || [];
+});
+
+registerIpcHandler(
+  'ANALYSIS:GET_EVENTS',
+  async (event, fileHash, { offset = 0, limit = null } = {}) => {
+    logger.debug(
+      'IPC: ANALYSIS:GET_EVENTS called for fileHash:',
+      fileHash,
+      'offset:',
+      offset,
+      'limit:',
+      limit,
+    );
+
+    // Check preview cache first
+    if (previewAnalysisCache.has(fileHash)) {
+      const cached = previewAnalysisCache.get(fileHash);
+      const events = cached?.linear_analysis?.events || [];
+      if (limit) {
+        return events.slice(offset, offset + limit);
+      }
+      return events.slice(offset);
+    }
+
+    // Get from database
+    const analysis = db.getAnalysis(fileHash);
+    const events = analysis?.linear_analysis?.events || [];
+    if (limit) {
+      return events.slice(offset, offset + limit);
+    }
+    return events.slice(offset);
+  },
+);
+
+// Debug handler to check file path resolution
+registerIpcHandler('DEBUG:CHECK_FILE_PATH', async (event, fileHash) => {
+  try {
+    const analysis = db.getAnalysis(fileHash);
+    return {
+      fileHash,
+      filePath: analysis?.file_path,
+      exists: analysis?.file_path ? fs.existsSync(analysis.file_path) : false,
+      hasAnalysis: !!analysis,
+    };
+  } catch (error) {
+    return {
+      fileHash,
+      error: error.message,
+      exists: false,
+      hasAnalysis: false,
+    };
+  }
+});
+
+registerIpcHandler('LYRICS:GET', async (event, { artist, title, album, duration }) => {
   try {
     const { fetchLyrics, parseLRC } = require('./services/lyrics');
-    const lyricsData = await fetchLyrics(artist, title);
+
+    // Validate inputs
+    if (!artist || !title) {
+      return { success: false, error: 'Artist and Title are required' };
+    }
+
+    logger.debug(`[IPC] LYRICS:GET for "${title}" by "${artist}"`);
+
+    // Pass all metadata to the service
+    const lyricsData = await fetchLyrics(artist, title, album, duration);
+
     if (!lyricsData) {
       return { success: false, error: 'Lyrics not found' };
     }
+
+    // Parse synced lyrics if available
     const parsed = parseLRC(lyricsData.synced);
-    return { success: true, lyrics: { ...lyricsData, parsed } };
+
+    return {
+      success: true,
+      lyrics: {
+        ...lyricsData,
+        parsed, // This is the array [{time: 12.5, text: "..."}] the UI needs
+      },
+    };
   } catch (error) {
+    logger.error('[IPC] LYRICS:GET Failed:', error);
     return { success: false, error: error.message };
   }
 });
@@ -1266,11 +1576,13 @@ registerIpcHandler('ANALYSIS:PARSE_MIDI', async (event, payload) => {
     }
 
     // Fallback: parse the MIDI and save analysis, then attach to project
+    const parser = await ensureMidiParser();
+    if (!parser) throw new Error('No midi parser available');
     let res;
-    if (midiParser.parseMidiFileToLinear) {
-      res = await midiParser.parseMidiFileToLinear(midiPath);
-    } else if (midiParser.parseMidiToLinearAnalysis) {
-      res = midiParser.parseMidiToLinearAnalysis(midiPath);
+    if (parser.parseMidiFileToLinear) {
+      res = await parser.parseMidiFileToLinear(midiPath);
+    } else if (parser.parseMidiToLinearAnalysis) {
+      res = parser.parseMidiToLinearAnalysis(midiPath);
     } else {
       throw new Error('No midi parser available');
     }
@@ -1311,7 +1623,7 @@ registerIpcHandler('ANALYSIS:RECALC_CHORDS', async (event, { fileHash, options =
       const structuralMap = analysis.structural_map || null;
       if (!cloned.metadata) cloned.metadata = {};
       const opt = options || {};
-      
+
       // Load calibrated parameters from engineConfig as defaults
       let calibratedChordOptions = {};
       try {
@@ -1320,25 +1632,30 @@ registerIpcHandler('ANALYSIS:RECALC_CHORDS', async (event, { fileHash, options =
           let loadConfigFn = null;
           if (typeof engineConfig.loadConfig === 'function') {
             loadConfigFn = engineConfig.loadConfig;
-          } else if (engineConfig.default && typeof engineConfig.default.loadConfig === 'function') {
+          } else if (
+            engineConfig.default &&
+            typeof engineConfig.default.loadConfig === 'function'
+          ) {
             loadConfigFn = engineConfig.default.loadConfig;
           } else if (typeof engineConfig.default === 'function') {
             // If default is the loadConfig function itself
             loadConfigFn = engineConfig.default;
           }
-          
+
           if (loadConfigFn) {
             const config = loadConfigFn();
             calibratedChordOptions = config.chordOptions || {};
-            console.log('[RECALC_CHORDS] Using calibrated parameters:', calibratedChordOptions);
+            logger.debug('[RECALC_CHORDS] Using calibrated parameters:', calibratedChordOptions);
           } else {
-            console.log('[RECALC_CHORDS] engineConfig available but loadConfig not found, using UI defaults');
+            logger.debug(
+              '[RECALC_CHORDS] engineConfig available but loadConfig not found, using UI defaults',
+            );
           }
         }
       } catch (err) {
-        console.warn('[RECALC_CHORDS] Failed to load engineConfig:', err.message);
+        logger.warn('[RECALC_CHORDS] Failed to load engineConfig:', err.message);
       }
-      
+
       // Merge: UI options override calibrated defaults
       const mergedOptions = {
         globalKey:
@@ -1389,16 +1706,34 @@ registerIpcHandler('ANALYSIS:RECALC_CHORDS', async (event, { fileHash, options =
       };
 
       if (options.commit) {
+        // Save Analysis Lab settings to DB so they persist for future analyses
+        if (opt.transitionProb !== undefined) {
+          db.setSetting('analysis_transitionProb', opt.transitionProb);
+        }
+        if (opt.diatonicBonus !== undefined) {
+          db.setSetting('analysis_diatonicBonus', opt.diatonicBonus);
+        }
+        if (opt.rootPeakBias !== undefined) {
+          db.setSetting('analysis_rootPeakBias', opt.rootPeakBias);
+        }
+        if (opt.temperature !== undefined) {
+          db.setSetting('analysis_temperature', opt.temperature);
+        }
+        if (opt.globalKey) {
+          db.setSetting('analysis_globalKey', opt.globalKey);
+        }
+        logger.info('[RECALC_CHORDS] Saved Analysis Lab settings to DB');
+
         // Persist changes to DB by updating the analysis row
         const success = db.updateAnalysisById(updatedAnalysis.id, updatedAnalysis);
         if (!success) throw new Error('Failed to commit analysis update');
         // Clear preview cache since changes are now in DB
         previewAnalysisCache.delete(fileHash);
-        console.log('Chord recalculation committed to database');
+        logger.info('Chord recalculation committed to database');
       } else {
         // Preview mode: store in cache so ANALYSIS:GET_RESULT can return it
         previewAnalysisCache.set(fileHash, updatedAnalysis);
-        console.log('Chord recalculation applied in preview mode (cached, not committed)');
+        logger.info('Chord recalculation applied in preview mode (cached, not committed)');
       }
 
       // Trigger UI update by reloading analysis
@@ -1410,10 +1745,10 @@ registerIpcHandler('ANALYSIS:RECALC_CHORDS', async (event, { fileHash, options =
         if (mainWindow && !mainWindow.isDestroyed()) {
           // Send a signal to reload the analysis
           mainWindow.webContents.send('ANALYSIS:RELOAD_REQUESTED', { fileHash });
-          console.log('Requested analysis reload for preview');
+          logger.debug('Requested analysis reload for preview');
         }
       } catch (loadErr) {
-        console.warn('Failed to request reload:', loadErr.message);
+        logger.warn('Failed to request reload:', loadErr.message);
       }
 
       return { success: true, events: res.events };
@@ -1589,11 +1924,11 @@ registerIpcHandler(
         const success = db.updateAnalysisById(updatedAnalysis.id, updatedAnalysis);
         if (!success) throw new Error('Failed to commit section update');
         previewAnalysisCache.delete(fileHash); // Clear cache
-        console.log('Section sculpting committed to database');
+        logger.info('Section sculpting committed to database');
       } else {
         // Preview mode: store in cache
         previewAnalysisCache.set(fileHash, updatedAnalysis);
-        console.log('Section sculpting applied in preview mode (cached)');
+        logger.info('Section sculpting applied in preview mode (cached)');
       }
 
       // Trigger UI reload
@@ -1602,7 +1937,7 @@ registerIpcHandler(
           mainWindow.webContents.send('ANALYSIS:RELOAD_REQUESTED', { fileHash });
         }
       } catch (loadErr) {
-        console.warn('Failed to request reload:', loadErr.message);
+        logger.warn('Failed to request reload:', loadErr.message);
       }
 
       return {
@@ -1611,7 +1946,7 @@ registerIpcHandler(
         commit: commit || false,
       };
     } catch (err) {
-      console.error('[ANALYSIS:SCULPT_SECTION] Error:', err);
+      logger.error('[ANALYSIS:SCULPT_SECTION] Error:', err);
       return { success: false, error: err.message || String(err) };
     }
   },
@@ -1655,6 +1990,38 @@ registerIpcHandler(
         (p) => {},
       );
       if (commit) {
+        // Save Analysis Lab settings to DB so they persist for future analyses
+        if (options.adaptiveSensitivity !== undefined) {
+          db.setSetting('analysis_adaptiveSensitivity', options.adaptiveSensitivity);
+        }
+        if (options.mfccWeight !== undefined) {
+          db.setSetting('analysis_mfccWeight', options.mfccWeight);
+        }
+        if (options.detailLevel !== undefined) {
+          db.setSetting('analysis_detailLevel', options.detailLevel);
+        }
+        if (options.scaleWeights) {
+          // Store detailLevel instead of scaleWeights (it's derived from detailLevel)
+          // The detailLevel should already be set above, but we can compute it if needed
+        }
+        // V1 parameters
+        if (options.noveltyKernel !== undefined) {
+          db.setSetting('analysis_noveltyKernel', options.noveltyKernel);
+        }
+        if (options.sensitivity !== undefined) {
+          db.setSetting('analysis_sensitivity', options.sensitivity);
+        }
+        if (options.mergeChromaThreshold !== undefined) {
+          db.setSetting('analysis_mergeChromaThreshold', options.mergeChromaThreshold);
+        }
+        if (options.minSectionDurationSec !== undefined) {
+          db.setSetting('analysis_minSectionDurationSec', options.minSectionDurationSec);
+        }
+        if (options.forceOverSeg !== undefined) {
+          db.setSetting('analysis_forceOverSeg', options.forceOverSeg ? 'true' : 'false');
+        }
+        logger.info('[RESEGMENT] Saved Analysis Lab settings to DB');
+
         analysis.structural_map = corrected;
         const success = db.updateAnalysisById(analysis.id, analysis);
         if (!success) throw new Error('Failed to commit resegment');
@@ -1669,7 +2036,7 @@ registerIpcHandler(
 // Generate structure from constraints (Sandbox Mode)
 registerIpcHandler('SANDBOX:GENERATE', async (event, constraints) => {
   try {
-    console.log('[SANDBOX] Generating structure with constraints:', constraints);
+    logger.debug('[SANDBOX] Generating structure with constraints:', constraints);
     const structuralMap = structureGenerator.generateStructure(constraints);
 
     // Convert to blocks format
@@ -1694,7 +2061,7 @@ registerIpcHandler('SANDBOX:GENERATE', async (event, constraints) => {
       });
     });
 
-    console.log('[SANDBOX] ✅ Generated', blocks.length, 'sections');
+    logger.info('[SANDBOX] ✅ Generated', blocks.length, 'sections');
 
     // Store blocks for persistence
     currentBlocks = blocks;
@@ -1706,7 +2073,7 @@ registerIpcHandler('SANDBOX:GENERATE', async (event, constraints) => {
 
     return { success: true, blocks, structuralMap };
   } catch (error) {
-    console.error('SANDBOX: Error generating structure:', error);
+    logger.error('SANDBOX: Error generating structure:', error);
     return { success: false, error: error.message };
   }
 });
@@ -1756,22 +2123,31 @@ registerIpcHandler('LIBRARY:SCAN_DIRECTORY', async () => {
       const bi = require('./services/batchImporter');
       batchImporter = bi && bi.default ? bi.default : bi;
     }
-    
+
     if (!batchImporter) throw new Error('Batch importer not available');
-    
+
     // Use the library directory from the project root
     const projectRoot = path.resolve(__dirname, '..');
     const libraryRoot = path.join(projectRoot, 'library');
-    
-    console.log('[LIBRARY:SCAN_DIRECTORY] Scanning library root:', libraryRoot);
+
+    logger.info('[LIBRARY:SCAN_DIRECTORY] Scanning library root:', libraryRoot);
     const { files, datasets } = batchImporter.scanLibraryDirectory(libraryRoot);
-    console.log('[LIBRARY:SCAN_DIRECTORY] Found', files.length, 'files across', Object.keys(datasets).length, 'datasets');
-    console.log('[LIBRARY:SCAN_DIRECTORY] Audio files:', files.filter(f => f.type === 'audio').length);
-    
+    logger.debug(
+      '[LIBRARY:SCAN_DIRECTORY] Found',
+      files.length,
+      'files across',
+      Object.keys(datasets).length,
+      'datasets',
+    );
+    logger.debug(
+      '[LIBRARY:SCAN_DIRECTORY] Audio files:',
+      files.filter((f) => f.type === 'audio').length,
+    );
+
     const matched = batchImporter.matchFiles(files);
-    console.log('[LIBRARY:SCAN_DIRECTORY] Matched', matched.length, 'groups');
+    logger.info('[LIBRARY:SCAN_DIRECTORY] Matched', matched.length, 'groups');
     const stats = batchImporter.getDatasetStats(libraryRoot);
-    
+
     return {
       success: true,
       files: files.length,
@@ -1790,45 +2166,58 @@ registerIpcHandler('LIBRARY:BATCH_IMPORT', async (event, { groups, options = {} 
     if (!groups || !Array.isArray(groups)) {
       throw new Error('Missing groups array');
     }
-    
+
     const userDataPath = app.getPath('userData');
     const results = [];
     const errors = [];
-    
+
     for (const group of groups) {
       try {
         // Only import groups with audio files (or JSON for reference datasets)
         if (!group.audio && !group.json) {
-          console.log('[BATCH_IMPORT] Skipping group without audio or json:', group);
+          logger.debug('[BATCH_IMPORT] Skipping group without audio or json:', group);
           continue;
         }
-        
+
         // Verify audio file exists if provided
         if (group.audio?.path && !fs.existsSync(group.audio.path)) {
-          console.warn('[BATCH_IMPORT] Audio file not found:', group.audio.path);
+          logger.warn('[BATCH_IMPORT] Audio file not found:', group.audio.path);
           errors.push({ group, error: `Audio file not found: ${group.audio.path}` });
           continue;
         }
-        
+
         // Copy lyrics file if present
         let lyricsPath = null;
         if (group.lyrics?.path && fs.existsSync(group.lyrics.path)) {
           try {
             const { randomUUID } = require('crypto');
             const uuid = randomUUID();
-            lyricsPath = libraryService.copyFileToLibrary(userDataPath, group.lyrics.path, 'lyrics', uuid);
-            console.log('[BATCH_IMPORT] Copied lyrics file:', lyricsPath);
+            lyricsPath = libraryService.copyFileToLibrary(
+              userDataPath,
+              group.lyrics.path,
+              'lyrics',
+              uuid,
+            );
+            logger.debug('[BATCH_IMPORT] Copied lyrics file:', lyricsPath);
           } catch (lyricsErr) {
-            console.warn('[BATCH_IMPORT] Failed to copy lyrics file:', lyricsErr);
+            logger.warn('[BATCH_IMPORT] Failed to copy lyrics file:', lyricsErr);
           }
         }
-        
+
         const payload = {
           audioPath: group.audio?.path,
           midiPath: group.midi?.path,
           lyricsPath: lyricsPath,
-          title: group.title || group.audio?.metadata?.title || group.json?.metadata?.title || path.basename(group.audio?.path || group.json?.path || '', path.extname(group.audio?.path || group.json?.path || '')),
-          artist: group.artist || group.audio?.metadata?.artist || group.json?.metadata?.artist || '',
+          title:
+            group.title ||
+            group.audio?.metadata?.title ||
+            group.json?.metadata?.title ||
+            path.basename(
+              group.audio?.path || group.json?.path || '',
+              path.extname(group.audio?.path || group.json?.path || ''),
+            ),
+          artist:
+            group.artist || group.audio?.metadata?.artist || group.json?.metadata?.artist || '',
           bpm: group.audio?.metadata?.bpm || group.json?.metadata?.bpm || null,
           key: group.audio?.metadata?.key || group.json?.metadata?.key || null,
           metadata: {
@@ -1842,18 +2231,25 @@ registerIpcHandler('LIBRARY:BATCH_IMPORT', async (event, { groups, options = {} 
             lyricsPath: lyricsPath,
           },
         };
-        
-        console.log('[BATCH_IMPORT] Creating project:', payload.title, 'from', payload.audioPath || 'JSON only');
+
+        logger.info(
+          '[BATCH_IMPORT] Creating project:',
+          payload.title,
+          'from',
+          payload.audioPath || 'JSON only',
+        );
         const result = libraryService.createProject(userDataPath, payload);
         if (result.success) {
           results.push(result);
-          
+
           // If JSON has pre-analyzed data, create a synthetic analysis
           if (group.json?.metadata && group.json.metadata.sections && options.importPreAnalyzed) {
             try {
               const linearAnalysis = {
                 metadata: {
-                  duration_seconds: group.json.metadata.sections?.[group.json.metadata.sections.length - 1]?.end_time || 0,
+                  duration_seconds:
+                    group.json.metadata.sections?.[group.json.metadata.sections.length - 1]
+                      ?.end_time || 0,
                   detected_key: group.json.metadata.key || null,
                   bpm: group.json.metadata.bpm || null,
                 },
@@ -1863,7 +2259,7 @@ registerIpcHandler('LIBRARY:BATCH_IMPORT', async (event, { groups, options = {} 
                   chord: c.chord || c,
                 })),
               };
-              
+
               const structuralMap = {
                 sections: (group.json.metadata.sections || []).map((s, idx) => ({
                   section_id: `SECTION_${String.fromCharCode(65 + (idx % 26))}${Math.floor(idx / 26) + 1}`,
@@ -1876,7 +2272,7 @@ registerIpcHandler('LIBRARY:BATCH_IMPORT', async (event, { groups, options = {} 
                   },
                 })),
               };
-              
+
               libraryService.saveAnalysisForProject(
                 result.id,
                 {
@@ -1886,7 +2282,7 @@ registerIpcHandler('LIBRARY:BATCH_IMPORT', async (event, { groups, options = {} 
                 app,
               );
             } catch (analysisErr) {
-              console.warn('[BatchImport] Failed to create pre-analyzed data:', analysisErr);
+              logger.warn('[BatchImport] Failed to create pre-analyzed data:', analysisErr);
             }
           }
         } else {
@@ -1896,7 +2292,7 @@ registerIpcHandler('LIBRARY:BATCH_IMPORT', async (event, { groups, options = {} 
         errors.push({ group, error: err.message || String(err) });
       }
     }
-    
+
     return {
       success: true,
       imported: results.length,
@@ -1911,13 +2307,13 @@ registerIpcHandler('LIBRARY:BATCH_IMPORT', async (event, { groups, options = {} 
 registerIpcHandler('ARCHITECT:UPDATE_BLOCKS', async (event, blocks = []) => {
   try {
     currentBlocks = Array.isArray(blocks) ? blocks : [];
-    console.log('ARCHITECT:UPDATE_BLOCKS received', currentBlocks.length, 'blocks');
+    logger.debug('ARCHITECT:UPDATE_BLOCKS received', currentBlocks.length, 'blocks');
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('UI:BLOCKS_UPDATE', currentBlocks);
     }
     return { success: true, count: currentBlocks.length };
   } catch (error) {
-    console.error('ARCHITECT:UPDATE_BLOCKS error:', error);
+    logger.error('ARCHITECT:UPDATE_BLOCKS error:', error);
     return { success: false, error: error.message };
   }
 });
@@ -1928,11 +2324,11 @@ registerIpcHandler('ARCHITECT:FORCE_SPLIT', async (event, { frame }) => {
     if (typeof frame !== 'number' || frame < 0) {
       return { success: false, error: 'Invalid frame index' };
     }
-    console.log('[ARCHITECT:FORCE_SPLIT] Requested manual split at frame', frame);
+    logger.info('[ARCHITECT:FORCE_SPLIT] Requested manual split at frame', frame);
     // Prototype: In a future version, load current analysis, inject boundary, recompute clusters.
     return { success: true, insertedFrame: frame };
   } catch (error) {
-    console.error('[ARCHITECT:FORCE_SPLIT] Error:', error);
+    logger.error('[ARCHITECT:FORCE_SPLIT] Error:', error);
     return { success: false, error: error.message };
   }
 });
@@ -1945,8 +2341,8 @@ registerIpcHandler('ANALYSIS:LOAD_TO_ARCHITECT', async (event, fileHash) => {
       return { success: false, error: 'Analysis not found or invalid' };
     }
 
-    console.log('Converting analysis sections to blocks...');
-    console.log('Sections found:', analysis.structural_map.sections.length);
+    logger.debug('Converting analysis sections to blocks...');
+    logger.debug('Sections found:', analysis.structural_map.sections.length);
 
     // Convert sections to blocks format
     const blocks = analysis.structural_map.sections.map((section, index) => {
@@ -1970,34 +2366,34 @@ registerIpcHandler('ANALYSIS:LOAD_TO_ARCHITECT', async (event, fileHash) => {
         probability_score: section.probability_score || 0.5,
       };
 
-      console.log(`Block ${index}:`, block.id, block.label, block.length, 'bars');
+      logger.debug(`Block ${index}:`, block.id, block.label, block.length, 'bars');
       return block;
     });
 
-    console.log(`Sending ${blocks.length} blocks to UI...`);
+    logger.info(`Sending ${blocks.length} blocks to UI...`);
 
     // Store blocks for persistence
     currentBlocks = blocks;
-    console.log('Blocks stored in memory:', currentBlocks.length);
+    logger.debug('Blocks stored in memory:', currentBlocks.length);
 
     // Send blocks to UI
     if (mainWindow && !mainWindow.isDestroyed()) {
       try {
         mainWindow.webContents.send('UI:BLOCKS_UPDATE', blocks);
-        console.log('Blocks sent successfully via UI:BLOCKS_UPDATE');
+        logger.debug('Blocks sent successfully via UI:BLOCKS_UPDATE');
 
         // Also send a second time after a small delay to ensure it's received
         setTimeout(() => {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('UI:BLOCKS_UPDATE', blocks);
-            console.log('Blocks re-sent (retry)');
+            logger.debug('Blocks re-sent (retry)');
           }
         }, 100);
       } catch (error) {
-        console.error('Error sending blocks:', error);
+        logger.error('Error sending blocks:', error);
       }
     } else {
-      console.warn('Main window not available for sending blocks');
+      logger.warn('Main window not available for sending blocks');
     }
 
     const noveltyCurve =
@@ -2014,7 +2410,7 @@ registerIpcHandler('ANALYSIS:LOAD_TO_ARCHITECT', async (event, fileHash) => {
 
     return { success: true, blocks, count: blocks.length, noveltyCurve };
   } catch (error) {
-    console.error('Error loading analysis to Architect:', error);
+    logger.error('Error loading analysis to Architect:', error);
     return { success: false, error: error.message };
   }
 });
@@ -2055,43 +2451,43 @@ registerIpcHandler('ANALYSIS:SET_METADATA', async (event, { fileHash, metadata }
 // Calibration handler - uses new optimization service
 registerIpcHandler('CALIBRATION:GET_BENCHMARKS', async (event) => {
   try {
-    console.log('[IPC] CALIBRATION:GET_BENCHMARKS called');
+    logger.debug('[IPC] CALIBRATION:GET_BENCHMARKS called');
 
     // Try to load service if not already loaded
     if (!calibrationService) {
-      console.log('[IPC] CalibrationService not loaded, attempting lazy load...');
+      logger.debug('[IPC] CalibrationService not loaded, attempting lazy load...');
       calibrationService = loadCalibrationService();
     }
 
     if (!calibrationService) {
       const errorMsg =
         'CalibrationService not available. Check terminal for TypeScript compilation errors.';
-      console.error('[IPC]', errorMsg);
+      logger.error('[IPC]', errorMsg);
       throw new Error(errorMsg);
     }
 
-    console.log('[IPC] calibrationService:', calibrationService ? 'exists' : 'null');
+    logger.debug('[IPC] calibrationService:', calibrationService ? 'exists' : 'null');
 
-    console.log(
+    logger.debug(
       '[IPC] calibrationService.getBenchmarks:',
       calibrationService?.getBenchmarks ? 'exists' : 'missing',
     );
-    console.log(
+    logger.debug(
       '[IPC] Available methods:',
       calibrationService ? Object.keys(calibrationService) : 'N/A',
     );
 
     if (!calibrationService.getBenchmarks) {
       const errorMsg = `CalibrationService.getBenchmarks not found. Available: ${Object.keys(calibrationService || {}).join(', ')}`;
-      console.error('[IPC]', errorMsg);
+      logger.error('[IPC]', errorMsg);
       throw new Error(errorMsg);
     }
 
     const benchmarks = calibrationService.getBenchmarks();
-    console.log('[IPC] CALIBRATION:GET_BENCHMARKS returning', benchmarks.length, 'benchmarks');
+    logger.debug('[IPC] CALIBRATION:GET_BENCHMARKS returning', benchmarks.length, 'benchmarks');
     return { success: true, benchmarks };
   } catch (error) {
-    console.error('[IPC] CALIBRATION:GET_BENCHMARKS error:', error);
+    logger.error('[IPC] CALIBRATION:GET_BENCHMARKS error:', error);
     return { success: false, error: error.message || String(error) };
   }
 });
@@ -2100,7 +2496,7 @@ registerIpcHandler('CALIBRATION:RUN', async (event, { selectedIds = null }) => {
   try {
     // Try to load service if not already loaded
     if (!calibrationService) {
-      console.log('[IPC] CalibrationService not loaded, attempting lazy load...');
+      logger.debug('[IPC] CalibrationService not loaded, attempting lazy load...');
       calibrationService = loadCalibrationService();
     }
 
@@ -2116,7 +2512,7 @@ registerIpcHandler('CALIBRATION:RUN', async (event, { selectedIds = null }) => {
         try {
           mainWindow.webContents.send('CALIBRATION:PROGRESS', data);
         } catch (err) {
-          console.error('Error sending calibration progress:', err);
+          logger.error('Error sending calibration progress:', err);
         }
       }
     };
@@ -2129,7 +2525,7 @@ registerIpcHandler('CALIBRATION:RUN', async (event, { selectedIds = null }) => {
     const result = await calibrationService.runCalibration(sendProgress, logCallback, selectedIds);
     return result;
   } catch (error) {
-    console.error('Calibration error:', error);
+    logger.error('Calibration error:', error);
     broadcastLog(`[CALIBRATION ERROR] ${error.message || String(error)}`);
     return { success: false, error: error.message || String(error) };
   }
@@ -2179,21 +2575,21 @@ function sendMacro(macroId) {
 
     // Safely log - handle broken pipe errors
     try {
-      console.log(`Executing Macro ${mappingName}`);
+      logger.info(`Executing Macro ${mappingName}`);
     } catch (error) {
       // Ignore EPIPE errors silently
       if (error.code !== 'EPIPE') {
-        console.error('Error logging:', error.message);
+        logger.error('Error logging:', error.message);
       }
     }
 
     const actionsJson = mapping[0].values[0][1];
     if (!actionsJson) {
       try {
-        console.log(`No actions found for macro ${mappingName}`);
+        logger.debug(`No actions found for macro ${mappingName}`);
       } catch (error) {
         if (error.code !== 'EPIPE') {
-          console.error('Error logging:', error.message);
+          logger.error('Error logging:', error.message);
         }
       }
       return;
@@ -2216,32 +2612,32 @@ function sendMacro(macroId) {
 
         // 4. Send OSC message
         try {
-          console.log(`Sending OSC message to ${action.daw}:`, message);
+          logger.debug(`Sending OSC message to ${action.daw}:`, message);
         } catch (error) {
           // Ignore EPIPE errors silently
           if (error.code !== 'EPIPE') {
-            console.error('Error logging:', error.message);
+            logger.error('Error logging:', error.message);
           }
         }
         oscClients[action.daw].send(message.address, message.args[0].value);
       } else {
         try {
-          console.log(`Could not find track index for ${action.track}`);
+          logger.debug(`Could not find track index for ${action.track}`);
         } catch (error) {
           // Ignore EPIPE errors silently
           if (error.code !== 'EPIPE') {
-            console.error('Error logging:', error.message);
+            logger.error('Error logging:', error.message);
           }
         }
       }
     });
   } else {
     try {
-      console.log(`Could not find macro with ID ${macroId}`);
+      logger.debug(`Could not find macro with ID ${macroId}`);
     } catch (error) {
       // Ignore EPIPE errors silently
       if (error.code !== 'EPIPE') {
-        console.error('Error logging:', error.message);
+        logger.error('Error logging:', error.message);
       }
     }
   }

@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "commonjs",
+    "module": "ESNext",
     "moduleResolution": "node",
     "esModuleInterop": true,
     "resolveJsonModule": true,
@@ -11,12 +11,12 @@
     "strict": false,
     "jsx": "react-jsx",
     "jsxImportSource": "react",
-    "baseUrl": "."
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "noEmit": true
   },
-  "include": [
-    "scripts/**/*",
-    "benchmarks/**/*",
-    "src/**/*"
-  ]
+  "include": ["scripts/**/*", "benchmarks/**/*", "src/**/*"],
+  "exclude": ["electron/**/*", "node_modules", "dist"]
 }
-

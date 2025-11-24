@@ -14,6 +14,9 @@ import type {
   AnalysisData,
   Project,
 } from '../types/editor';
+import { analysisCache, projectCache, invalidateAnalysisCache } from '../utils/cache';
+import logger from '@/lib/logger';
+import { handleAsyncError, AppError, showErrorToast } from '../utils/errorHandling';
 
 const EditorContext = createContext<EditorContextValue | null>(null);
 
@@ -39,14 +42,15 @@ export function EditorProvider({ children, initialData = null }: EditorProviderP
   // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackTime, setPlaybackTime] = useState(0);
-  const hasLoadedRef = useRef(false);
+  const loadedHashRef = useRef<string | null>(null);
 
   // Load analysis data if songData has fileHash but no linear_analysis
+  // ✅ FIX: Use ref to track loaded hash, break dependency cycle
   useEffect(() => {
     const load = async () => {
       // Already have full analysis
       if (songData?.linear_analysis) {
-        console.log('[EditorContext] Already have linear_analysis, skipping load');
+        logger.debug('[EditorContext] Already have linear_analysis, skipping load');
         return;
       }
 
@@ -57,51 +61,74 @@ export function EditorProvider({ children, initialData = null }: EditorProviderP
         initialData?.fileHash ||
         initialData?.file_hash;
       if (!fileHash) {
-        console.log('[EditorContext] No fileHash available, cannot load analysis');
+        logger.debug('[EditorContext] No fileHash available, cannot load analysis');
         return;
       }
 
-      // Prevent multiple simultaneous loads for the same hash
-      const loadKey = `loading-${fileHash}`;
-      if (hasLoadedRef.current === loadKey) {
-        console.log('[EditorContext] Already loading this fileHash:', fileHash);
+      // ✅ FIX: Skip if we've already loaded this hash
+      if (loadedHashRef.current === fileHash) {
+        logger.debug('[EditorContext] Already loaded this fileHash:', fileHash);
         return;
       }
 
-      console.log('[EditorContext] Loading analysis for fileHash:', fileHash);
-      hasLoadedRef.current = loadKey;
+      // Check cache first
+      const cachedAnalysis = analysisCache.get(fileHash);
+      if (cachedAnalysis) {
+        console.log('[EditorContext] Using cached analysis for:', fileHash);
+        setSongData(cachedAnalysis);
+        loadedHashRef.current = fileHash;
+        return;
+      }
+
+      logger.debug('[EditorContext] Loading analysis for fileHash:', fileHash);
+      loadedHashRef.current = fileHash; // Mark as loading
 
       try {
         const ipcAPI = globalThis?.electronAPI?.invoke || globalThis?.ipc?.invoke;
         if (!ipcAPI) {
-          console.error('[EditorContext] No IPC API available');
+          logger.error('[EditorContext] No IPC API available');
           hasLoadedRef.current = false;
           return;
         }
 
         const res = await ipcAPI('ANALYSIS:GET_RESULT', fileHash);
-        console.log('[EditorContext] ANALYSIS:GET_RESULT response:', {
+        logger.debug('[EditorContext] ANALYSIS:GET_RESULT response:', {
           success: res?.success,
           hasAnalysis: !!res?.analysis,
-          hasLinearAnalysis: !!res?.analysis?.linear_analysis,
-          hasStructuralMap: !!res?.analysis?.structural_map,
+          hasLinearAnalysis: !!res?.analysis?.linear_analysis || !!res?.linear_analysis,
+          hasStructuralMap: !!res?.analysis?.structural_map || !!res?.structural_map,
+          isDirectAnalysis: !!(res?.linear_analysis || res?.structural_map),
         });
 
+        // Handle both wrapped response { success: true, analysis: {...} } and direct analysis object
+        let analysisData = null;
         if (res?.success && res.analysis) {
-          console.log('[EditorContext] ✅ Setting analysis data from response');
-          setSongData(res.analysis);
-          hasLoadedRef.current = `loaded-${fileHash}`;
+          analysisData = res.analysis;
         } else if (res?.analysis) {
-          console.log('[EditorContext] ✅ Setting analysis data (no success flag)');
-          setSongData(res.analysis);
-          hasLoadedRef.current = `loaded-${fileHash}`;
+          analysisData = res.analysis;
+        } else if (res?.linear_analysis || res?.structural_map || res?.file_hash) {
+          // Response IS the analysis object directly
+          analysisData = res;
+        }
+
+        if (analysisData) {
+          logger.debug('[EditorContext] ✅ Setting analysis data:', {
+            hasLinearAnalysis: !!analysisData.linear_analysis,
+            hasStructuralMap: !!analysisData.structural_map,
+            hasFilePath: !!analysisData.file_path,
+            fileHash: analysisData.file_hash,
+          });
+          // Cache the analysis data
+          analysisCache.set(fileHash, analysisData);
+          setSongData(analysisData);
         } else {
-          console.warn('[EditorContext] ⚠️ ANALYSIS:GET_RESULT returned no analysis object', res);
-          hasLoadedRef.current = false; // Allow retry
+          logger.warn('[EditorContext] ⚠️ ANALYSIS:GET_RESULT returned no analysis object', res);
+          loadedHashRef.current = null; // ✅ Allow retry if no data
         }
       } catch (e) {
-        console.error('[EditorContext] ❌ Failed to load analysis:', e);
-        hasLoadedRef.current = false; // Allow retry on error
+        const appError = handleAsyncError(e, 'EditorContext.loadAnalysis');
+        logger.error('[EditorContext] ❌ Failed to load analysis:', appError.message);
+        loadedHashRef.current = null; // ✅ Allow retry on error
       }
     };
 
@@ -109,15 +136,21 @@ export function EditorProvider({ children, initialData = null }: EditorProviderP
   }, [
     songData?.fileHash,
     songData?.file_hash,
-    songData?.linear_analysis,
-    initialData?.fileHash,
-    initialData?.file_hash,
+    // ✅ REMOVED: songData?.linear_analysis - causes infinite loop!
   ]);
 
   // Load project data when analysis data is available
   useEffect(() => {
     const loadProject = async () => {
       if (!songData?.id) return; // Need analysis ID to find project
+
+      // Check cache first
+      const cachedProject = projectCache.get(songData.id);
+      if (cachedProject) {
+        logger.debug('[EditorContext] Using cached project for analysis:', songData.id);
+        setProject(cachedProject);
+        return;
+      }
 
       try {
         const ipcAPI = globalThis?.electronAPI?.invoke || globalThis?.ipc?.invoke;
@@ -128,15 +161,18 @@ export function EditorProvider({ children, initialData = null }: EditorProviderP
         if (projectsRes?.success && projectsRes.projects) {
           const project = projectsRes.projects.find((p: any) => p.analysis_id === songData.id);
           if (project) {
-            console.log('[EditorContext] Found project for analysis:', project);
+            logger.debug('[EditorContext] Found project for analysis:', project);
+            projectCache.set(songData.id, project);
             setProject(project);
           } else {
-            console.log('[EditorContext] No project found for analysis ID:', songData.id);
+            logger.debug('[EditorContext] No project found for analysis ID:', songData.id);
             setProject(null);
           }
         }
       } catch (e) {
-        console.error('[EditorContext] Failed to load project:', e);
+        const appError = handleAsyncError(e, 'EditorContext.loadProject');
+        logger.error('[EditorContext] Failed to load project:', appError.message);
+        showErrorToast(appError);
         setProject(null);
       }
     };
@@ -145,11 +181,21 @@ export function EditorProvider({ children, initialData = null }: EditorProviderP
   }, [songData?.id]);
 
   // Listen for chord recalculation updates
+  // ✅ FIX: Register listener ONCE, use ref to access latest data
   useEffect(() => {
     if (!globalThis?.ipc?.on) return;
 
+    // ✅ Use ref to access latest songData without dependency
+    const songDataRef = { current: songData };
+
+    // Update ref whenever songData changes (outside this effect)
+    const updateRef = () => {
+      songDataRef.current = songData;
+    };
+    updateRef();
+
     const handleReloadRequest = async (fileHash: string) => {
-      const currentHash = songData?.fileHash || songData?.file_hash;
+      const currentHash = songDataRef.current?.fileHash || songDataRef.current?.file_hash;
       if (fileHash && fileHash === currentHash) {
         console.log('[EditorContext] Reloading analysis after chord update...');
         try {
@@ -159,9 +205,20 @@ export function EditorProvider({ children, initialData = null }: EditorProviderP
             console.log('[EditorContext] Analysis reloaded with updated chords');
           } else if (res?.analysis) {
             setSongData(res.analysis);
+          } else {
+            const error = new AppError(
+              'Failed to reload analysis after chord update',
+              'RELOAD_FAILED',
+              'The analysis could not be reloaded. Your changes may not be visible.',
+              false, // Not critical, user can manually refresh
+            );
+            console.warn('[EditorContext] Reload failed:', error.message);
+            showErrorToast(error);
           }
         } catch (err) {
-          console.error('[EditorContext] Failed to reload:', err);
+          const appError = handleAsyncError(err, 'EditorContext.handleReloadRequest');
+          console.error('[EditorContext] Failed to reload:', appError.message);
+          showErrorToast(appError);
         }
       }
     };
@@ -175,7 +232,7 @@ export function EditorProvider({ children, initialData = null }: EditorProviderP
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [songData?.fileHash, songData?.file_hash]);
+  }, []); // ✅ FIXED: Empty deps - register ONCE
 
   // Actions
   const selectObject = useCallback(
@@ -207,9 +264,20 @@ export function EditorProvider({ children, initialData = null }: EditorProviderP
             },
           }));
           setIsDirty(true);
+        } else {
+          const error = new AppError(
+            res?.error || 'Failed to recalculate chords for new key',
+            'RECALC_FAILED',
+            'Could not update chords for the new key. Please try again.',
+            true,
+          );
+          console.error('[EditorContext] Recalc chord failed:', error.message);
+          showErrorToast(error);
         }
       } catch (e) {
-        console.error('[EditorContext] Recalc chord failed', e);
+        const appError = handleAsyncError(e, 'EditorContext.updateKey');
+        console.error('[EditorContext] Recalc chord failed:', appError.message);
+        showErrorToast(appError);
       } finally {
         setIsProcessing(false);
       }
@@ -300,9 +368,20 @@ export function EditorProvider({ children, initialData = null }: EditorProviderP
       });
       if (res?.success) {
         setIsDirty(false);
+      } else {
+        const error = new AppError(
+          res?.error || 'Failed to save changes',
+          'SAVE_FAILED',
+          'Could not save your changes. Please try again.',
+          true,
+        );
+        console.error('[EditorContext] Failed to commit changes:', error.message);
+        showErrorToast(error);
       }
     } catch (err) {
-      console.error('[EditorContext] Failed to commit changes', err);
+      const appError = handleAsyncError(err, 'EditorContext.saveChanges');
+      console.error('[EditorContext] Failed to commit changes:', appError.message);
+      showErrorToast(appError);
     } finally {
       setIsProcessing(false);
     }

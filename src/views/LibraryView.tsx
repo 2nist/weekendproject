@@ -3,6 +3,7 @@ import LibraryTable from '@/components/LibraryTable';
 import BatchImportPanel from '@/components/library/BatchImportPanel';
 import ReferenceDatasetBrowser from '@/components/library/ReferenceDatasetBrowser';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.jsx';
+import logger from '@/lib/logger';
 
 export default function LibraryView() {
   const [projects, setProjects] = useState([]);
@@ -17,19 +18,19 @@ export default function LibraryView() {
     setError(null);
     try {
       const res = await window.ipc.invoke('LIBRARY:GET_PROJECTS');
-      console.log('[LibraryView] Load projects response:', res);
+      logger.debug('[LibraryView] Load projects response:', res);
       if (res && res.success) {
         setProjects(res.projects || []);
       } else {
         const errorMsg = res?.error || 'Unknown error loading projects';
         setError(errorMsg);
-        console.error('[LibraryView] Failed to load projects:', errorMsg);
+        logger.error('[LibraryView] Failed to load projects:', errorMsg);
         setProjects([]);
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       setError(errorMsg);
-      console.error('[LibraryView] Exception loading projects:', err);
+      logger.error('[LibraryView] Exception loading projects:', err);
       setProjects([]);
     } finally {
       setLoading(false);
@@ -60,7 +61,7 @@ export default function LibraryView() {
       });
       if (res && res.success) loadProjects();
     } catch (err) {
-      console.error('Analyze failed', err);
+      logger.error('Analyze failed', err);
     } finally {
       setLoading(false);
     }
@@ -76,7 +77,7 @@ export default function LibraryView() {
       });
       if (res && res.success) loadProjects();
     } catch (err) {
-      console.error('Re-analyze failed', err);
+      logger.error('Re-analyze failed', err);
     } finally {
       setLoading(false);
     }
@@ -97,7 +98,7 @@ export default function LibraryView() {
       });
       if (res && res.success) loadProjects();
     } catch (err) {
-      console.error('Attach MIDI failed', err);
+      logger.error('Attach MIDI failed', err);
     }
   };
 
@@ -124,7 +125,7 @@ export default function LibraryView() {
         alert('Failed to create project: ' + (createRes?.error || 'Unknown error'));
       }
     } catch (err) {
-      console.error('YouTube import failed', err);
+      logger.error('YouTube import failed', err);
       alert('Import error: ' + err.message);
     } finally {
       setImporting(false);

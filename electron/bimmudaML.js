@@ -6,6 +6,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const logger = require('./analysis/logger');
 
 class BIMMUDA_ML_Integration {
   constructor() {
@@ -26,7 +27,7 @@ class BIMMUDA_ML_Integration {
 
       // Check if models directory exists and has models
       if (!fs.existsSync(this.modelsPath)) {
-        console.warn('Models directory not found - models need to be trained first');
+        logger.warn('Models directory not found - models need to be trained first');
         this.isInitialized = false;
         return false;
       }
@@ -36,16 +37,16 @@ class BIMMUDA_ML_Integration {
       const hasModels = modelFiles.some((file) => file.endsWith('.h5'));
 
       if (!hasModels) {
-        console.warn('No trained models found - please run training first');
+        logger.warn('No trained models found - please run training first');
         this.isInitialized = false;
         return false;
       }
 
       this.isInitialized = true;
-      console.log('✅ BIMMUDA ML integration initialized');
+      logger.info('✅ BIMMUDA ML integration initialized');
       return true;
     } catch (error) {
-      console.error('Failed to initialize BIMMUDA ML integration:', error);
+      logger.error('Failed to initialize BIMMUDA ML integration:', error);
       this.isInitialized = false;
       return false;
     }
@@ -116,7 +117,7 @@ class BIMMUDA_ML_Integration {
 
       return result.predictions || [];
     } catch (error) {
-      console.error('Chord progression prediction failed:', error);
+      logger.error('Chord progression prediction failed:', error);
       return [];
     }
   }
@@ -136,7 +137,7 @@ class BIMMUDA_ML_Integration {
 
       return result.classification || null;
     } catch (error) {
-      console.error('Style classification failed:', error);
+      logger.error('Style classification failed:', error);
       return null;
     }
   }
@@ -157,7 +158,7 @@ class BIMMUDA_ML_Integration {
 
       return result.melody || null;
     } catch (error) {
-      console.error('Melody generation failed:', error);
+      logger.error('Melody generation failed:', error);
       return null;
     }
   }
@@ -177,7 +178,7 @@ class BIMMUDA_ML_Integration {
 
       return result;
     } catch (error) {
-      console.error('Audio analysis failed:', error);
+      logger.error('Audio analysis failed:', error);
       return { error: error.message };
     }
   }

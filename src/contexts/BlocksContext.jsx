@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import logger from '@/lib/logger';
 import PropTypes from 'prop-types';
 
 const BlocksContext = createContext(null);
@@ -28,21 +29,24 @@ export function BlocksProvider({ children }) {
   useEffect(() => {
     if (!globalThis.__blocksMountCount) globalThis.__blocksMountCount = 0;
     globalThis.__blocksMountCount++;
-    console.log('[BlocksProvider] Mounting - subscribing to blocks updates (SINGLETON) - count:', globalThis.__blocksMountCount);
+    logger.debug(
+      '[BlocksProvider] Mounting - subscribing to blocks updates (SINGLETON) - count:',
+      globalThis.__blocksMountCount,
+    );
 
     const handleIncomingBlocks = (data) => {
       const blocksArray = Array.isArray(data) ? data : [];
-      console.log('[BlocksProvider] UI:BLOCKS_UPDATE received:', blocksArray.length, 'blocks');
+      logger.debug('[BlocksProvider] UI:BLOCKS_UPDATE received:', blocksArray.length, 'blocks');
       try {
         const hash = JSON.stringify(blocksArray);
         if (lastBlocksHash.current === hash) {
-          console.log('[BlocksProvider] Received identical blocks; skipping update');
+          logger.debug('[BlocksProvider] Received identical blocks; skipping update');
         } else {
           setLocalBlocks(blocksArray);
           lastBlocksHash.current = hash;
         }
       } catch (err) {
-        console.error('[BlocksProvider] Error hashing blocks for comparison:', err);
+        logger.error('[BlocksProvider] Error hashing blocks for comparison:', err);
         setLocalBlocks(blocksArray);
       }
       globalThis.__lastBlocks = blocksArray;
@@ -60,14 +64,14 @@ export function BlocksProvider({ children }) {
       if (!globalThis.__blocksRequestSent && !hasRequestedRef.current) {
         try {
           globalThis.ipc.send('UI:REQUEST_INITIAL');
-          console.log('[BlocksProvider] Requested initial blocks from backend (ONCE)');
+          logger.debug('[BlocksProvider] Requested initial blocks from backend (ONCE)');
           globalThis.__blocksRequestSent = true;
           hasRequestedRef.current = true;
         } catch (error) {
-          console.error('[BlocksProvider] Error requesting initial blocks:', error);
+          logger.error('[BlocksProvider] Error requesting initial blocks:', error);
         }
       } else {
-        console.log('[BlocksProvider] Skipping initial request; already sent');
+        logger.debug('[BlocksProvider] Skipping initial request; already sent');
       }
     }
 
@@ -80,12 +84,15 @@ export function BlocksProvider({ children }) {
 
     return () => {
       globalThis.__blocksMountCount = Math.max(0, (globalThis.__blocksMountCount || 1) - 1);
-      console.log('[BlocksProvider] Unmounting - cleaning up subscriptions - remaining:', globalThis.__blocksMountCount);
+      logger.debug(
+        '[BlocksProvider] Unmounting - cleaning up subscriptions - remaining:',
+        globalThis.__blocksMountCount,
+      );
       try {
-          // Do not unsubscribe the global IPC handler - it should persist across HMR remounts
-          // Only cleanup browser handler for this instance below
+        // Do not unsubscribe the global IPC handler - it should persist across HMR remounts
+        // Only cleanup browser handler for this instance below
       } catch (e) {
-        console.error('[BlocksProvider] Error unsubscribing blocks:', e);
+        logger.error('[BlocksProvider] Error unsubscribing blocks:', e);
       }
       globalThis.removeEventListener('UI:BLOCKS_UPDATE', browserHandler);
     };
@@ -97,7 +104,7 @@ export function BlocksProvider({ children }) {
       globalThis.__lastBlocks = next;
       if (globalThis?.electronAPI?.invoke) {
         globalThis.electronAPI.invoke('ARCHITECT:UPDATE_BLOCKS', next).catch((error) => {
-          console.error('Error syncing blocks with backend:', error);
+          logger.error('Error syncing blocks with backend:', error);
         });
       }
       return next;
@@ -106,11 +113,7 @@ export function BlocksProvider({ children }) {
 
   const value = React.useMemo(() => ({ blocks, setBlocks }), [blocks, setBlocks]);
 
-  return (
-    <BlocksContext.Provider value={value}>
-      {children}
-    </BlocksContext.Provider>
-  );
+  return <BlocksContext.Provider value={value}>{children}</BlocksContext.Provider>;
 }
 
 BlocksProvider.propTypes = {

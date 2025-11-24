@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import logger from '@/lib/logger';
 
 export interface Settings {
   reaper_port?: string;
@@ -19,7 +20,7 @@ export function useSettings() {
     try {
       // Check if IPC is available
       if (!window?.ipc?.invoke) {
-        console.warn('IPC not available, settings will not load');
+        logger.warn('IPC not available, settings will not load');
         setSettings({});
         setLoading(false);
         return;
@@ -33,7 +34,7 @@ export function useSettings() {
         setSettings({});
       }
     } catch (err) {
-      console.error('Error loading settings:', err);
+      logger.error('Error loading settings:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
       // Set empty settings as fallback
       setSettings({});
@@ -52,7 +53,7 @@ export function useSettings() {
         return { success: false, error: res?.error || 'Failed to update setting' };
       }
     } catch (err) {
-      console.error('Error updating setting:', err);
+      logger.error('Error updating setting:', err);
       return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
     }
   }, []);
@@ -69,4 +70,3 @@ export function useSettings() {
     updateSetting,
   };
 }
-

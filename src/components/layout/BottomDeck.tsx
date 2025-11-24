@@ -24,17 +24,55 @@ export const BottomDeck: React.FC<BottomDeckProps> = ({
   const [currentTime, setCurrentTime] = useState(0);
   const { state, actions } = useEditor();
 
-  // Get project info from props or context
-  const projectId = propProjectId || state.project?.id?.toString();
-  const songFilename =
-    propSongFilename ||
-    (state.project?.audio_path ? state.project.audio_path.split(/[/\\]/).pop() : undefined);
+  // Get audio source from EditorContext
+  const songData = state.songData;
+  const filePath = songData?.file_path || songData?.metadata?.file_path;
 
-  // TEMP: Test media protocol with hardcoded file
-  const testMediaUrl = 'media://test/01 Come Together.mp3';
+  // Debug logging (throttled)
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      console.log('[BottomDeck] Audio data:', {
+        hasSongData: !!songData,
+        hasFilePath: !!filePath,
+        filePath: filePath,
+        songDataKeys: songData ? Object.keys(songData) : [],
+      });
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [!!songData, !!filePath]);
+
+  // Convert file path to proper URL format
+  const getAudioUrl = (path: string | undefined): string | undefined => {
+    if (!path) return undefined;
+
+    // If already a media:// or http(s):// URL, return as-is
+    if (path.startsWith('media://') || path.startsWith('http://') || path.startsWith('https://')) {
+      return path;
+    }
+
+    // Convert to media:// protocol for Electron (avoids CORS/security issues)
+    // The media:// protocol handler in main.js will resolve the file path
+    let normalized = path.replace(/\\/g, '/');
+
+    // Remove any existing file:// prefix
+    normalized = normalized.replace(/^file:\/\/\/?/, '');
+
+    // Use media:// protocol with the full path
+    // Format: media://C:/path/to/file.mp3
+    return `media://${normalized}`;
+  };
+
+  const audioUrl = getAudioUrl(filePath);
+
+  // Debug logging - show what URL we're using
+  React.useEffect(() => {
+    if (audioUrl) {
+      console.log('[BottomDeck] Audio URL:', audioUrl);
+    }
+  }, [audioUrl]);
 
   // Update duration when audio loads (only when songData actually changes, not on every render)
-  const songDataId = state.songData?.id || state.songData?.fileHash || state.songData?.file_hash;
+  const songDataId = songData?.id || songData?.fileHash || songData?.file_hash;
   useEffect(() => {
     if (audioRef.current && songDataId) {
       const dur = audioRef.current.getDuration();
@@ -110,16 +148,24 @@ export const BottomDeck: React.FC<BottomDeckProps> = ({
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // Don't render if no audio file
-  if (!projectId || !songFilename) {
+  // Show message if no audio file available
+  const hasAudio = !!audioUrl;
+  if (!hasAudio) {
     return (
       <div
         className={cn(
-          'h-20 bg-card border-t border-border flex items-center justify-center text-muted-foreground',
+          'h-20 bg-card border-t border-border flex flex-col items-center justify-center text-muted-foreground text-sm gap-1',
           className,
         )}
       >
-        No audio file loaded
+        <div>{songData ? 'Audio file path not found in analysis data' : 'No analysis loaded'}</div>
+        {songData && (
+          <div className="text-xs opacity-70">
+            FileHash: {songData.fileHash || songData.file_hash || 'none'} | Has file_path:{' '}
+            {songData.file_path ? 'yes' : 'no'} | Has metadata.file_path:{' '}
+            {songData.metadata?.file_path ? 'yes' : 'no'}
+          </div>
+        )}
       </div>
     );
   }
@@ -198,7 +244,7 @@ export const BottomDeck: React.FC<BottomDeckProps> = ({
       {/* Hidden Audio Engine */}
       <AudioEngine
         ref={audioRef}
-        src={testMediaUrl}
+        src={audioUrl}
         onTimeUpdate={(time) => {
           setCurrentTime(time);
           actions.setPlaybackTime(time);

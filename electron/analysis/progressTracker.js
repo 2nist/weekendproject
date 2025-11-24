@@ -3,6 +3,8 @@
  * Tracks analysis progress and sends updates via IPC
  */
 
+const logger = require('./logger');
+
 class ProgressTracker {
   constructor(session, mainWindow) {
     this.session = session;
@@ -20,18 +22,22 @@ class ProgressTracker {
   broadcast() {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       try {
-        this.mainWindow.webContents.send('ANALYSIS:PROGRESS', {
+        const progressData = {
           fileHash: this.session.fileHash,
           state: this.session.state,
           progress: this.session.progress,
           estimatedTimeRemaining: this.session.getEstimatedTimeRemaining(),
-        });
+        };
+        logger.debug('[PROGRESS_TRACKER] Broadcasting progress:', progressData);
+        this.mainWindow.webContents.send('ANALYSIS:PROGRESS', progressData);
       } catch (error) {
         // Silently ignore if window is destroyed
         if (error.code !== 'EPIPE') {
-          console.error('Error broadcasting progress:', error);
+          logger.error('Error broadcasting progress:', error);
         }
       }
+    } else {
+      logger.warn('[PROGRESS_TRACKER] Cannot broadcast - mainWindow not available');
     }
   }
 
@@ -51,4 +57,3 @@ class ProgressTracker {
 module.exports = {
   ProgressTracker,
 };
-

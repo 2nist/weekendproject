@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
 const os = require('os');
+const logger = require('../analysis/logger');
 
 /**
  * Centralized path configuration for the application
@@ -22,7 +23,7 @@ class PathConfig {
         return JSON.parse(data);
       }
     } catch (error) {
-      console.error('[PathConfig] Failed to load config:', error);
+      logger.error('[PathConfig] Failed to load config:', error);
     }
 
     // Default configuration
@@ -33,13 +34,13 @@ class PathConfig {
     const userDataPath = this.userDataPath;
     // Use app directory for local storage instead of userData
     const appPath = path.dirname(path.dirname(userDataPath)); // Go up from userData to app dir
-    
+
     // Detect common Google Drive paths
     const googleDrivePaths = [
       path.join(os.homedir(), 'Google Drive'),
       path.join(os.homedir(), 'GoogleDrive'),
       'G:\\My Drive', // Mapped drive
-    ].filter(p => fs.existsSync(p));
+    ].filter((p) => fs.existsSync(p));
 
     return {
       // Version for future migrations
@@ -67,7 +68,7 @@ class PathConfig {
         midi: googleDrivePaths[0] ? path.join(googleDrivePaths[0], 'Progression', 'midi') : null,
         json: googleDrivePaths[0] ? path.join(googleDrivePaths[0], 'Progression', 'json') : null,
         syncOnImport: false, // Auto-copy to cloud on import
-        syncOnExport: true,  // Auto-copy exports to cloud
+        syncOnExport: true, // Auto-copy exports to cloud
       },
 
       // Custom paths (advanced users)
@@ -103,7 +104,7 @@ class PathConfig {
       fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), 'utf8');
       return { success: true };
     } catch (error) {
-      console.error('[PathConfig] Failed to save config:', error);
+      logger.error('[PathConfig] Failed to save config:', error);
       return { success: false, error: error.message };
     }
   }
@@ -148,24 +149,22 @@ class PathConfig {
    * Ensure all configured directories exist
    */
   ensureDirectories() {
-    const paths = [
-      ...Object.values(this.config.local),
-    ];
+    const paths = [...Object.values(this.config.local)];
 
     if (this.config.cloud.enabled) {
-      paths.push(...Object.values(this.config.cloud).filter(v => typeof v === 'string'));
+      paths.push(...Object.values(this.config.cloud).filter((v) => typeof v === 'string'));
     }
 
     if (this.config.strategy === 'custom') {
-      paths.push(...Object.values(this.config.custom).filter(v => v));
+      paths.push(...Object.values(this.config.custom).filter((v) => v));
     }
 
-    paths.forEach(p => {
+    paths.forEach((p) => {
       if (p && !fs.existsSync(p)) {
         try {
           fs.mkdirSync(p, { recursive: true });
         } catch (error) {
-          console.error(`[PathConfig] Failed to create directory ${p}:`, error);
+          logger.error(`[PathConfig] Failed to create directory ${p}:`, error);
         }
       }
     });
@@ -186,7 +185,7 @@ class PathConfig {
    */
   enableGoogleDrive(googleDrivePath) {
     const progressionRoot = path.join(googleDrivePath, 'Progression');
-    
+
     this.config.cloud = {
       enabled: true,
       provider: 'googledrive',
@@ -239,7 +238,7 @@ class PathConfig {
     try {
       const filename = path.basename(localPath);
       const destPath = path.join(cloudPath, filename);
-      
+
       // Ensure cloud directory exists
       if (!fs.existsSync(cloudPath)) {
         fs.mkdirSync(cloudPath, { recursive: true });
@@ -247,10 +246,10 @@ class PathConfig {
 
       // Copy file
       fs.copyFileSync(localPath, destPath);
-      
+
       return { success: true, cloudPath: destPath };
     } catch (error) {
-      console.error('[PathConfig] Cloud backup failed:', error);
+      logger.error('[PathConfig] Cloud backup failed:', error);
       return { success: false, error: error.message };
     }
   }

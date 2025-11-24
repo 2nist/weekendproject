@@ -16,18 +16,21 @@ async function readID3Tags(filePath) {
     // Try to load music-metadata
     const mm = require('music-metadata');
     if (!mm || !fs.existsSync(filePath)) {
-      logger.debug('[Metadata] ⚠️ music-metadata not available or file not found, skipping ID3 read');
+      logger.debug(
+        '[Metadata] ⚠️ music-metadata not available or file not found, skipping ID3 read',
+      );
       return null;
     }
 
     logger.debug('[Metadata] 📖 Reading ID3 tags from:', path.basename(filePath));
     const metadata = await mm.parseFile(filePath);
-    
+
     const id3Data = {
       title: metadata.common.title || null,
-      artist: metadata.common.artist || (metadata.common.artists && metadata.common.artists[0]) || null,
+      artist:
+        metadata.common.artist || (metadata.common.artists && metadata.common.artists[0]) || null,
       album: metadata.common.album || null,
-      genre: metadata.common.genre && metadata.common.genre[0] || null,
+      genre: (metadata.common.genre && metadata.common.genre[0]) || null,
       bpm: metadata.common.bpm ? Math.round(metadata.common.bpm) : null,
       key: metadata.common.key || null,
       year: metadata.common.year || null,
@@ -40,7 +43,7 @@ async function readID3Tags(filePath) {
     if (id3Data.bpm) found.push(`BPM: ${id3Data.bpm}`);
     if (id3Data.key) found.push(`Key: ${id3Data.key}`);
     if (id3Data.genre) found.push(`Genre: ${id3Data.genre}`);
-    
+
     if (found.length > 0) {
       logger.pass0('[Metadata] ✅ Found ID3 tags:', found.join(', '));
     } else {
@@ -60,22 +63,23 @@ async function readID3Tags(filePath) {
  */
 function parseKeyFromID3(keyString) {
   if (!keyString || typeof keyString !== 'string') return null;
-  
+
   // Common formats: "C major", "Am", "A minor", "C", "1A" (key code)
   const keyMatch = keyString.match(/^([A-G][#b]?)/i);
   if (!keyMatch) return null;
-  
+
   const root = keyMatch[1];
-  const mode = keyString.toLowerCase().includes('minor') || keyString.toLowerCase().includes('m') 
-    ? 'aeolian' 
-    : 'ionian';
-  
+  const mode =
+    keyString.toLowerCase().includes('minor') || keyString.toLowerCase().includes('m')
+      ? 'aeolian'
+      : 'ionian';
+
   return { root, mode };
 }
 
 async function gatherMetadata(filePath, userHints = {}) {
   logger.pass0('[Metadata] 🔵 Pass 0: Starting metadata lookup...');
-  
+
   const metadata = {
     file_path: filePath,
     analysis_timestamp: new Date().toISOString(),
@@ -85,7 +89,24 @@ async function gatherMetadata(filePath, userHints = {}) {
 
   // Read ID3 tags from file
   const id3Data = await readID3Tags(filePath);
-  
+
+  // Store ID3 metadata (artist, title, album) for lyrics and display
+  if (id3Data?.title) {
+    metadata.title = id3Data.title;
+  }
+  if (id3Data?.artist) {
+    metadata.artist = id3Data.artist;
+  }
+  if (id3Data?.album) {
+    metadata.album = id3Data.album;
+  }
+  if (id3Data?.genre) {
+    metadata.genre = id3Data.genre;
+  }
+  if (id3Data?.year) {
+    metadata.year = id3Data.year;
+  }
+
   // Extract key from ID3 if available
   if (id3Data?.key) {
     const parsedKey = parseKeyFromID3(id3Data.key);
@@ -95,14 +116,14 @@ async function gatherMetadata(filePath, userHints = {}) {
       logger.pass0(`[Metadata] ✅ Found ID3 Key: ${parsedKey.root} ${parsedKey.mode}`);
     }
   }
-  
+
   // Extract BPM from ID3 if available
   if (id3Data?.bpm) {
     metadata.tempo_hint = id3Data.bpm;
     logger.pass0(`[Metadata] ✅ Found ID3 BPM: ${id3Data.bpm}`);
   }
-  
-  // Extract genre from ID3 if available
+
+  // Extract genre from ID3 if available (as hint)
   if (id3Data?.genre && !userHints.genre) {
     metadata.genre_hint = id3Data.genre.toLowerCase();
     logger.pass0(`[Metadata] ✅ Found ID3 Genre: ${id3Data.genre}`);
@@ -145,7 +166,7 @@ async function gatherMetadata(filePath, userHints = {}) {
   if (metadata.key_hint) summary.push(`Key: ${metadata.key_hint}`);
   if (metadata.tempo_hint) summary.push(`BPM: ${metadata.tempo_hint}`);
   if (metadata.genre_hint) summary.push(`Genre: ${metadata.genre_hint}`);
-  
+
   if (summary.length > 0) {
     logger.pass0(`[Metadata] ✅ Pass 0 Complete - Metadata: ${summary.join(', ')}`);
   } else {
@@ -158,4 +179,3 @@ async function gatherMetadata(filePath, userHints = {}) {
 module.exports = {
   gatherMetadata,
 };
-

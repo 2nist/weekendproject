@@ -6,6 +6,7 @@
  */
 
 import { useMemo } from 'react';
+import logger from '@/lib/logger';
 import { transformAnalysisToGrid } from '../utils/gridTransformers';
 import { useEditor } from '../contexts/EditorContext';
 
@@ -17,7 +18,7 @@ export function useAnalysisSandbox() {
   const grid = useMemo(() => {
     try {
       if (!songData?.linear_analysis) {
-        console.log('[useAnalysisSandbox] No linear_analysis in songData:', {
+        logger.debug('[useAnalysisSandbox] No linear_analysis in songData:', {
           hasSongData: !!songData,
           hasLinearAnalysis: !!songData?.linear_analysis,
           fileHash: songData?.fileHash || songData?.file_hash,
@@ -25,7 +26,7 @@ export function useAnalysisSandbox() {
         return [];
       }
 
-      console.log('[useAnalysisSandbox] Transforming grid from songData:', {
+      logger.debug('[useAnalysisSandbox] Transforming grid from songData:', {
         hasLinearAnalysis: !!songData.linear_analysis,
         hasStructuralMap: !!songData.structural_map,
         eventsCount: songData.linear_analysis?.events?.length || 0,
@@ -37,7 +38,7 @@ export function useAnalysisSandbox() {
 
       // Flatten sections to get all measures
       if (!Array.isArray(sections)) {
-        console.warn('[useAnalysisSandbox] transformAnalysisToGrid returned non-array:', sections);
+        logger.warn('[useAnalysisSandbox] transformAnalysisToGrid returned non-array:', sections);
         return [];
       }
 
@@ -48,7 +49,7 @@ export function useAnalysisSandbox() {
         }
       });
 
-      console.log('[useAnalysisSandbox] Grid computed:', {
+      logger.debug('[useAnalysisSandbox] Grid computed:', {
         sectionsCount: sections.length,
         measuresCount: measures.length,
         beatsCount: measures.reduce((sum, m) => sum + (m?.beats?.length || 0), 0),
@@ -56,7 +57,7 @@ export function useAnalysisSandbox() {
 
       return measures;
     } catch (error) {
-      console.error('[useAnalysisSandbox] ❌ Error transforming grid:', error);
+      logger.error('[useAnalysisSandbox] ❌ Error transforming grid:', error);
       return [];
     }
   }, [songData]);

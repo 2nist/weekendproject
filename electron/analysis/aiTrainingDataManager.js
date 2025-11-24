@@ -5,6 +5,7 @@
 
 const fs = require('fs').promises;
 const path = require('path');
+const logger = require('./logger');
 
 class AITrainingDataManager {
   constructor(libraryPath) {
@@ -18,7 +19,7 @@ class AITrainingDataManager {
   async loadAnnotationData() {
     const unifiedFiles = await this.findUnifiedAnnotationFiles();
 
-    console.log(`Loading ${unifiedFiles.length} unified annotation files...`);
+    logger.info(`Loading ${unifiedFiles.length} unified annotation files...`);
 
     const annotations = [];
     for (const file of unifiedFiles) {
@@ -26,12 +27,12 @@ class AITrainingDataManager {
         const data = JSON.parse(await fs.readFile(file, 'utf8'));
         annotations.push(data);
       } catch (error) {
-        console.warn(`Failed to load annotation file ${file}:`, error.message);
+        logger.warn(`Failed to load annotation file ${file}:`, error.message);
       }
     }
 
     this.cache.set('annotations', annotations);
-    console.log(`Loaded ${annotations.length} annotation datasets`);
+    logger.info(`Loaded ${annotations.length} annotation datasets`);
 
     return annotations;
   }
@@ -45,10 +46,10 @@ class AITrainingDataManager {
     try {
       const data = JSON.parse(await fs.readFile(bimmudaPath, 'utf8'));
       this.cache.set('bimmuda', data);
-      console.log(`Loaded BIMMUDA data with ${data.songs?.length || 0} songs`);
+      logger.info(`Loaded BIMMUDA data with ${data.songs?.length || 0} songs`);
       return data;
     } catch (error) {
-      console.warn('Failed to load BIMMUDA data:', error.message);
+      logger.warn('Failed to load BIMMUDA data:', error.message);
       return null;
     }
   }
@@ -62,10 +63,10 @@ class AITrainingDataManager {
     try {
       const data = JSON.parse(await fs.readFile(datasetPath, 'utf8'));
       this.cache.set(`dataset_${datasetName}`, data);
-      console.log(`Loaded ${datasetName} dataset with ${data.total_samples} samples`);
+      logger.info(`Loaded ${datasetName} dataset with ${data.total_samples} samples`);
       return data;
     } catch (error) {
-      console.warn(`Failed to load ${datasetName} dataset:`, error.message);
+      logger.warn(`Failed to load ${datasetName} dataset:`, error.message);
       return null;
     }
   }

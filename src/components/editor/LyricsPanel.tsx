@@ -21,10 +21,12 @@ export default function LyricsPanel() {
   const [isPlaying, setIsPlaying] = useState(false);
   const lyricsRef = useRef<HTMLDivElement>(null);
 
-  // Get artist and title from metadata
-  const metadata = state.songData?.linear_analysis?.metadata || {};
-  const artist = metadata.artist || metadata.artist_name || 'Unknown Artist';
-  const title = metadata.title || metadata.track_name || 'Unknown Title';
+  // Get artist and title from metadata (check both linear_analysis.metadata and top-level metadata)
+  const linearMetadata = state.songData?.linear_analysis?.metadata || {};
+  const topLevelMetadata = state.songData?.metadata || {};
+  const metadata = { ...topLevelMetadata, ...linearMetadata };
+  const artist = metadata.artist || metadata.artist_name || topLevelMetadata.artist || 'Unknown Artist';
+  const title = metadata.title || metadata.track_name || topLevelMetadata.title || 'Unknown Title';
 
   // Fetch lyrics when component mounts or metadata changes
   useEffect(() => {

@@ -6,6 +6,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 const { Midi } = require('@tonejs/midi'); // Assuming Tone.js MIDI support
+const logger = require('./logger');
 
 class BIMMUDAProcessor {
   constructor(libraryPath) {
@@ -18,19 +19,19 @@ class BIMMUDAProcessor {
    * Process entire BIMMUDA dataset
    */
   async processDataset() {
-    console.log('Starting BIMMUDA dataset processing...');
+    logger.info('Starting BIMMUDA dataset processing...');
 
     const years = await this.getYears();
     const trainingData = [];
 
     for (const year of years) {
-      console.log(`Processing year ${year}...`);
+      logger.info(`Processing year ${year}...`);
       const yearData = await this.processYear(year);
       trainingData.push(...yearData);
     }
 
     this.processedData = trainingData;
-    console.log(`Processed ${trainingData.length} songs from BIMMUDA dataset`);
+    logger.info(`Processed ${trainingData.length} songs from BIMMUDA dataset`);
 
     return trainingData;
   }
@@ -63,7 +64,7 @@ class BIMMUDAProcessor {
           yearData.push(songData);
         }
       } catch (error) {
-        console.warn(`Failed to process song ${year}/${songDir}:`, error.message);
+        logger.warn(`Failed to process song ${year}/${songDir}:`, error.message);
       }
     }
 
@@ -88,7 +89,7 @@ class BIMMUDAProcessor {
     const hasLyrics = await this.fileExists(lyricsFile);
 
     if (!hasMidi) {
-      console.warn(`No MIDI file found for ${year}/${songId}`);
+      logger.warn(`No MIDI file found for ${year}/${songId}`);
       return null;
     }
 
@@ -172,7 +173,7 @@ class BIMMUDAProcessor {
         line_count: lines.length,
       };
     } catch (error) {
-      console.warn(`Failed to parse lyrics file: ${error.message}`);
+      logger.warn(`Failed to parse lyrics file: ${error.message}`);
       return null;
     }
   }
@@ -560,7 +561,7 @@ class BIMMUDAProcessor {
     };
 
     await fs.writeFile(outputPath, JSON.stringify(data, null, 2));
-    console.log(`Saved processed BIMMUDA data to ${outputPath}`);
+    logger.info(`Saved processed BIMMUDA data to ${outputPath}`);
   }
 
   /**

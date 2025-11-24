@@ -6,6 +6,7 @@
 
 const wavDecoder = require('wav-decoder');
 const fs = require('fs');
+const logger = require('../logger');
 const {
   calculateRMS,
   calculateChromaFlux,
@@ -37,11 +38,7 @@ function detectBeats(samples, sampleRate) {
   const threshold = (energy.reduce((a, b) => a + b, 0) / energy.length) * 1.5;
 
   for (let i = 1; i < energy.length - 1; i++) {
-    if (
-      energy[i] > threshold &&
-      energy[i] > energy[i - 1] &&
-      energy[i] > energy[i + 1]
-    ) {
+    if (energy[i] > threshold && energy[i] > energy[i - 1] && energy[i] > energy[i + 1]) {
       const timestamp = (i * hopSize) / sampleRate;
       beatTimestamps.push(timestamp);
     }
@@ -69,11 +66,7 @@ function detectBeats(samples, sampleRate) {
 /**
  * Extract chroma features using FFT (with progress callback)
  */
-async function extractChromaWithProgress(
-  samples,
-  sampleRate,
-  progressCallback = () => {},
-) {
+async function extractChromaWithProgress(samples, sampleRate, progressCallback = () => {}) {
   const frameSize = 2048;
   const hopSize = 1024;
   const chromaFrames = [];
@@ -124,9 +117,7 @@ async function extractChromaWithProgress(
     });
 
     const rms = calculateRMS(frame);
-    const spectralFlux = prevChromaVector
-      ? calculateChromaFlux(chroma, prevChromaVector)
-      : 0;
+    const spectralFlux = prevChromaVector ? calculateChromaFlux(chroma, prevChromaVector) : 0;
     const chromaEntropy = calculateChromaEntropy(chroma);
     const hasVocals = detectVocalPresence(rms, spectralFlux, chromaEntropy);
     if (processedFrames % 4 === 0) {
@@ -219,27 +210,10 @@ function extractChroma(samples, sampleRate) {
  */
 function detectKey(chromaFrames) {
   // Major and minor key profiles
-  const majorProfile = [
-    6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88,
-  ];
-  const minorProfile = [
-    6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17,
-  ];
+  const majorProfile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+  const minorProfile = [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
 
-  const noteNames = [
-    'C',
-    'C#',
-    'D',
-    'D#',
-    'E',
-    'F',
-    'F#',
-    'G',
-    'G#',
-    'A',
-    'A#',
-    'B',
-  ];
+  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
   // Average chroma across all frames
   const avgChroma = new Array(12).fill(0);
@@ -293,25 +267,10 @@ function detectKey(chromaFrames) {
  * Detect chords from chroma
  */
 function detectChord(chroma) {
-  const noteNames = [
-    'C',
-    'C#',
-    'D',
-    'D#',
-    'E',
-    'F',
-    'F#',
-    'G',
-    'G#',
-    'A',
-    'A#',
-    'B',
-  ];
+  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
   // Find strongest chroma bins
-  const sorted = chroma
-    .map((val, idx) => ({ val, idx }))
-    .sort((a, b) => b.val - a.val);
+  const sorted = chroma.map((val, idx) => ({ val, idx })).sort((a, b) => b.val - a.val);
 
   const rootIdx = sorted[0].idx;
   const root = noteNames[rootIdx];
@@ -338,26 +297,22 @@ function detectChord(chroma) {
  * Analyze audio file without Essentia
  */
 async function analyzeAudioSimple(filePath, progressCallback = () => {}) {
-  console.log('Simple analyzer: Starting analysis of', filePath);
+  logger.info('Simple analyzer: Starting analysis of', filePath);
   progressCallback(10);
 
   // Load WAV file
-  console.log('Simple analyzer: Loading WAV file...');
+  logger.debug('Simple analyzer: Loading WAV file...');
   const buffer = fs.readFileSync(filePath);
   const audioData = await wavDecoder.decode(buffer);
 
-  console.log('Simple analyzer: Audio loaded -', {
+  logger.debug('Simple analyzer: Audio loaded -', {
     sampleRate: audioData.sampleRate,
     channels: audioData.channelData.length,
     length: audioData.length,
     duration: audioData.length / audioData.sampleRate,
   });
 
-  if (
-    !audioData ||
-    !audioData.channelData ||
-    audioData.channelData.length === 0
-  ) {
+  if (!audioData || !audioData.channelData || audioData.channelData.length === 0) {
     throw new Error('Invalid audio data: no channels found');
   }
 
@@ -378,7 +333,7 @@ async function analyzeAudioSimple(filePath, progressCallback = () => {}) {
   const sampleRate = audioData.sampleRate;
   const duration = audioData.length / audioData.sampleRate;
 
-  console.log(
+  logger.debug(
     'Simple analyzer: Processing',
     samplesArray.length,
     'samples, duration:',
@@ -393,14 +348,11 @@ async function analyzeAudioSimple(filePath, progressCallback = () => {}) {
   progressCallback(30);
 
   // Beat detection (with progress updates)
-  console.log('Simple analyzer: Starting beat detection...');
+  logger.debug('Simple analyzer: Starting beat detection...');
   progressCallback(35);
   await new Promise((resolve) => setImmediate(resolve)); // Allow UI to update
-  const { beatTimestamps, downbeatTimestamps, tempo } = detectBeats(
-    samplesArray,
-    sampleRate,
-  );
-  console.log(
+  const { beatTimestamps, downbeatTimestamps, tempo } = detectBeats(samplesArray, sampleRate);
+  logger.debug(
     'Simple analyzer: Beat detection complete -',
     beatTimestamps.length,
     'beats, tempo:',
@@ -410,26 +362,25 @@ async function analyzeAudioSimple(filePath, progressCallback = () => {}) {
   await new Promise((resolve) => setImmediate(resolve));
 
   // Chroma extraction (process in chunks for progress visibility)
-  console.log('Simple analyzer: Starting chroma extraction...');
+  logger.debug('Simple analyzer: Starting chroma extraction...');
   progressCallback(45);
   await new Promise((resolve) => setImmediate(resolve));
-  const { chromaFrames, semanticFrames, frameStrideSeconds } =
-    await extractChromaWithProgress(samplesArray, sampleRate, (progress) => {
+  const { chromaFrames, semanticFrames, frameStrideSeconds } = await extractChromaWithProgress(
+    samplesArray,
+    sampleRate,
+    (progress) => {
       progressCallback(45 + (progress / 100) * 15); // 45-60%
-    });
-  console.log(
-    'Simple analyzer: Chroma extraction complete -',
-    chromaFrames.length,
-    'frames',
+    },
   );
+  logger.debug('Simple analyzer: Chroma extraction complete -', chromaFrames.length, 'frames');
   progressCallback(60);
   await new Promise((resolve) => setImmediate(resolve));
 
   // Key detection
-  console.log('Simple analyzer: Starting key detection...');
+  logger.debug('Simple analyzer: Starting key detection...');
   progressCallback(65);
   const { key, mode } = detectKey(chromaFrames);
-  console.log('Simple analyzer: Key detected -', key, mode);
+  logger.debug('Simple analyzer: Key detected -', key, mode);
   progressCallback(70);
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -443,8 +394,7 @@ async function analyzeAudioSimple(filePath, progressCallback = () => {}) {
     const beatTime = beatTimestamps[i];
     // Find nearest chroma frame
     const nearestFrame = chromaFrames.reduce((prev, curr) => {
-      return Math.abs(curr.timestamp - beatTime) <
-        Math.abs(prev.timestamp - beatTime)
+      return Math.abs(curr.timestamp - beatTime) < Math.abs(prev.timestamp - beatTime)
         ? curr
         : prev;
     });
@@ -456,12 +406,8 @@ async function analyzeAudioSimple(filePath, progressCallback = () => {}) {
           timestamp: beatTime,
           event_type: 'chord_candidate',
           chord_candidate: {
-            root_candidates: [
-              { root: chord.root, probability: chord.confidence },
-            ],
-            quality_candidates: [
-              { quality: chord.quality, probability: chord.confidence },
-            ],
+            root_candidates: [{ root: chord.root, probability: chord.confidence }],
+            quality_candidates: [{ quality: chord.quality, probability: chord.confidence }],
             bass_note: chord.root,
             bass_ambiguity_flag: chord.confidence < 0.6,
           },
@@ -490,11 +436,7 @@ async function analyzeAudioSimple(filePath, progressCallback = () => {}) {
   const chunkSize = Math.max(10000, Math.floor(samplesArray.length / 100)); // Process in ~100 chunks
   const onsetEvents = [];
 
-  for (
-    let chunkStart = 1;
-    chunkStart < samplesArray.length - 1;
-    chunkStart += chunkSize
-  ) {
+  for (let chunkStart = 1; chunkStart < samplesArray.length - 1; chunkStart += chunkSize) {
     const chunkEnd = Math.min(chunkStart + chunkSize, samplesArray.length - 1);
 
     for (let i = chunkStart; i < chunkEnd; i++) {
@@ -502,9 +444,7 @@ async function analyzeAudioSimple(filePath, progressCallback = () => {}) {
       if (diff > onsetThreshold && samplesArray[i] > samplesArray[i - 1]) {
         const timestamp = i / sampleRate;
         // Only add if not too close to a beat
-        const nearBeat = beatTimestamps.some(
-          (beat) => Math.abs(beat - timestamp) < 0.05,
-        );
+        const nearBeat = beatTimestamps.some((beat) => Math.abs(beat - timestamp) < 0.05);
         if (!nearBeat) {
           onsetEvents.push({
             timestamp,
@@ -527,17 +467,13 @@ async function analyzeAudioSimple(filePath, progressCallback = () => {}) {
   }
 
   events.push(...onsetEvents);
-  console.log(
-    'Simple analyzer: Event processing complete -',
-    events.length,
-    'events',
-  );
+  logger.debug('Simple analyzer: Event processing complete -', events.length, 'events');
   progressCallback(100);
 
   // Calculate tempo stability
   const tempoStability = beatTimestamps.length > 1 ? 0.85 : 0.5;
 
-  console.log('Simple analyzer: Analysis complete -', {
+  logger.info('Simple analyzer: Analysis complete -', {
     events: events.length,
     beats: beatTimestamps.length,
     tempo: tempo,
@@ -572,22 +508,15 @@ async function analyzeAudioSimple(filePath, progressCallback = () => {}) {
   };
 
   // Validate result has data
-  if (
-    !result.linear_analysis.events ||
-    result.linear_analysis.events.length === 0
-  ) {
-    console.warn(
-      'Simple analyzer: No events detected, creating placeholder event',
-    );
+  if (!result.linear_analysis.events || result.linear_analysis.events.length === 0) {
+    logger.warn('Simple analyzer: No events detected, creating placeholder event');
     result.linear_analysis.events = [
       {
         timestamp: 0,
         event_type: 'chord_candidate',
         chord_candidate: {
           root_candidates: [{ root: key, probability: 0.5 }],
-          quality_candidates: [
-            { quality: mode === 'minor' ? 'minor' : 'major', probability: 0.5 },
-          ],
+          quality_candidates: [{ quality: mode === 'minor' ? 'minor' : 'major', probability: 0.5 }],
           bass_note: key,
           bass_ambiguity_flag: false,
         },
@@ -604,25 +533,18 @@ async function analyzeAudioSimple(filePath, progressCallback = () => {}) {
     !result.linear_analysis.beat_grid.beat_timestamps ||
     result.linear_analysis.beat_grid.beat_timestamps.length === 0
   ) {
-    console.warn(
-      'Simple analyzer: No beats detected, creating placeholder beats',
-    );
+    logger.warn('Simple analyzer: No beats detected, creating placeholder beats');
     const beatInterval = 60 / tempo;
     const beats = [];
     for (let t = 0; t < duration; t += beatInterval) {
       beats.push(t);
     }
     result.linear_analysis.beat_grid.beat_timestamps = beats;
-    result.linear_analysis.beat_grid.downbeat_timestamps = beats.filter(
-      (_, i) => i % 4 === 0,
-    );
+    result.linear_analysis.beat_grid.downbeat_timestamps = beats.filter((_, i) => i % 4 === 0);
   }
 
-  if (
-    !result.linear_analysis.chroma_frames ||
-    result.linear_analysis.chroma_frames.length === 0
-  ) {
-    console.warn('Simple analyzer: No chroma frames, creating placeholder');
+  if (!result.linear_analysis.chroma_frames || result.linear_analysis.chroma_frames.length === 0) {
+    logger.warn('Simple analyzer: No chroma frames, creating placeholder');
     const frameCount = Math.floor(duration / 0.1);
     result.linear_analysis.chroma_frames = Array(frameCount)
       .fill(null)
@@ -632,7 +554,7 @@ async function analyzeAudioSimple(filePath, progressCallback = () => {}) {
       }));
   }
 
-  console.log('Simple analyzer: Final result validation:', {
+  logger.debug('Simple analyzer: Final result validation:', {
     events: result.linear_analysis.events.length,
     beats: result.linear_analysis.beat_grid.beat_timestamps.length,
     chromaFrames: result.linear_analysis.chroma_frames.length,

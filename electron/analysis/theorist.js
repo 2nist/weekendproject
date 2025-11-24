@@ -611,6 +611,7 @@ async function correctStructuralMap(
   const semanticallyLabeled = labelSectionsWithSemantics(
     working,
     linearAnalysis?.metadata || metadata,
+    linearAnalysis, // Pass full linear analysis for multi-factor similarity
   );
 
   progressCallback(100);

@@ -3,6 +3,15 @@ import { sectionsToBlocks } from '../utils/architectBlocks';
 import YouTubeInput from './importer/YouTubeInput';
 import ProbabilityDashboard from './ProbabilityDashboard';
 import AnalysisTuner from './tools/AnalysisTuner';
+import {
+  AppError,
+  handleAsyncError,
+  showErrorToast,
+  useAsyncOperation,
+  LoadingSpinner,
+  ProgressBar,
+  StatusIndicator,
+} from '../utils/errorHandling';
 
 /**
  * Analysis Job Manager
@@ -21,6 +30,95 @@ export default function AnalysisJobManager() {
   const [fileHash, setFileHash] = useState(null);
   const [analysisResult, setAnalysisResult] = useState(null);
   const progressUnsubscribeRef = useRef(null);
+
+  // Async operation for file selection
+  const fileSelectOperation = useAsyncOperation(
+    async () => {
+      if (!window.electronAPI || !window.electronAPI.showOpenDialog) {
+        throw new AppError(
+          'File selection is not available',
+          'ELECTRON_API_MISSING',
+          'File selection is not available. Please ensure you are running in Electron.',
+          false,
+        );
+      }
+
+      const result = await window.electronAPI.showOpenDialog({
+        title: 'Select Audio File',
+        filters: [
+          {
+            name: 'Audio Files',
+            extensions: ['wav', 'mp3', 'flac', 'm4a', 'ogg', 'aac'],
+          },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+        properties: ['openFile'],
+      });
+
+      if (result && !result.canceled && result.filePaths && result.filePaths.length > 0) {
+        return result.filePaths[0];
+      }
+
+      throw new AppError(
+        'No file selected',
+        'USER_CANCELLED',
+        'File selection was cancelled.',
+        true,
+      );
+    },
+    {
+      onSuccess: (selectedPath) => {
+        setFilePath(selectedPath);
+        setAnalysisStatus(null);
+        setProgress({ overall: 0, pass1: 0, pass2: 0, pass3: 0 });
+      },
+      onError: (error) => {
+        showErrorToast(error);
+      },
+    },
+  );
+
+  // Async operation for analysis
+  const analysisOperation = useAsyncOperation(
+    async (filePath) => {
+      if (!filePath) {
+        throw new AppError(
+          'No file selected',
+          'INVALID_INPUT',
+          'Please select an audio file first.',
+          true,
+        );
+      }
+
+      setAnalysisStatus('starting');
+      setProgress({ overall: 0, pass1: 0, pass2: 0, pass3: 0 });
+
+      // Start analysis via IPC
+      const result = await window.electronAPI.invoke('ANALYSIS:START', { filePath });
+
+      if (!result?.success) {
+        throw new AppError(
+          result?.error || 'Analysis failed',
+          'ANALYSIS_FAILED',
+          'Failed to analyze the audio file. Please try a different file or check the file format.',
+          true,
+        );
+      }
+
+      return result;
+    },
+    {
+      onSuccess: (result) => {
+        setFileHash(result.fileHash);
+        setAnalysisStatus('completed');
+        // Progress will be updated via IPC subscription
+      },
+      onError: (error) => {
+        setAnalysisStatus('error');
+        showErrorToast(error);
+      },
+    },
+  );
 
   const sendBlocksToArchitect = useCallback(
     async (hash, sections) => {
@@ -48,11 +146,25 @@ export default function AnalysisJobManager() {
             console.log(`Successfully loaded ${loadResult.count} sections into Architect view`);
             setAnalysisResult((prev) => ({ ...(prev || {}), loadResult }));
           } else {
-            console.warn('Failed to load analysis to Architect via IPC:', loadResult?.error);
+            const error = new AppError(
+              loadResult?.error || 'Failed to load analysis to Architect',
+              'LOAD_FAILED',
+              'Could not load analysis results into the Architect view. The analysis completed but the results may not be visible.',
+              false, // Not critical, fallback available
+            );
+            console.warn('Failed to load analysis to Architect via IPC:', error.message);
+            showErrorToast(error);
             fallbackDispatch(sectionsToBlocks(sections));
           }
         } catch (error) {
+          const appError = new AppError(
+            'Error loading analysis to Architect',
+            'IPC_ERROR',
+            'Failed to communicate with the analysis engine. Using fallback display mode.',
+            false, // Not critical, fallback available
+          );
           console.error('Error loading analysis to Architect:', error);
+          showErrorToast(appError);
           fallbackDispatch(sectionsToBlocks(sections));
         }
       } else {
@@ -76,171 +188,66 @@ export default function AnalysisJobManager() {
     };
   }, []);
 
-  const handleFileSelect = async () => {
-    try {
-      // Check if electronAPI is available
-      if (!window.electronAPI || !window.electronAPI.showOpenDialog) {
-        alert('File selection is not available. Please ensure you are running in Electron.');
-        console.error('electronAPI.showOpenDialog is not available');
-        return;
+  // Listen for analysis progress updates
+  useEffect(() => {
+    if (!window.ipc || !window.ipc.on) return;
+
+    const handleProgressUpdate = (progressData) => {
+      console.log('[AnalysisJobManager] Progress update:', progressData);
+      if (progressData && typeof progressData === 'object') {
+        setProgress((prev) => ({
+          ...prev,
+          overall: progressData.progress?.overall || progressData.progress || 0,
+          pass1:
+            progressData.progress?.pass1 ||
+            (progressData.state === 'pass1' ? progressData.progress : prev.pass1) ||
+            0,
+          pass2:
+            progressData.progress?.pass2 ||
+            (progressData.state === 'pass2' ? progressData.progress : prev.pass2) ||
+            0,
+          pass3:
+            progressData.progress?.pass3 ||
+            (progressData.state === 'pass3' ? progressData.progress : prev.pass3) ||
+            0,
+        }));
+
+        // Update current step based on state
+        if (progressData.state) {
+          setCurrentStep(progressData.state.replace('pass', 'Pass ').replace('step', 'Step '));
+        }
+
+        setAnalysisStatus('processing');
       }
+    };
 
-      // Use Electron's dialog API to get the actual file path
-      const result = await window.electronAPI.showOpenDialog({
-        title: 'Select Audio File',
-        filters: [
-          {
-            name: 'Audio Files',
-            extensions: ['wav', 'mp3', 'flac', 'm4a', 'ogg', 'aac'],
-          },
-          { name: 'All Files', extensions: ['*'] },
-        ],
-        properties: ['openFile'],
-      });
+    const unsubscribe = window.ipc.on('ANALYSIS:PROGRESS', handleProgressUpdate);
+    progressUnsubscribeRef.current = unsubscribe;
 
-      if (result && !result.canceled && result.filePaths && result.filePaths.length > 0) {
-        const selectedPath = result.filePaths[0];
-        setFilePath(selectedPath);
-        setAnalysisStatus(null);
-        setProgress({ overall: 0, pass1: 0, pass2: 0, pass3: 0 });
-      }
-    } catch (error) {
-      console.error('Error selecting file:', error);
-      alert(`Error selecting file: ${error.message || 'Unknown error'}`);
-    }
-  };
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
 
-  const handleStartAnalysis = async () => {
+  const handleFileSelect = useCallback(() => {
+    fileSelectOperation.execute();
+  }, [fileSelectOperation]);
+
+  const handleStartAnalysis = useCallback(() => {
     if (!filePath) {
-      alert('Please select an audio file');
+      showErrorToast(
+        new AppError(
+          'No file selected',
+          'INVALID_INPUT',
+          'Please select an audio file first.',
+          true,
+        ),
+      );
       return;
     }
 
-    setAnalysisStatus('starting');
-    setProgress({ overall: 0, pass1: 0, pass2: 0, pass3: 0 });
-    setCurrentStep('Starting analysis...');
-
-    try {
-      // Set up progress listener BEFORE starting analysis
-      if (window.ipc && typeof window.ipc.on === 'function') {
-        console.log('Setting up progress listener...');
-        const unsubscribe = window.ipc.on('ANALYSIS:PROGRESS', (data) => {
-          console.log('Progress update received:', data);
-          if (data && data.progress) {
-            setProgress(data.progress);
-            console.log(
-              `Progress: Overall=${data.progress.overall}%, Pass1=${data.progress.pass1}%, Pass2=${data.progress.pass2}%, Pass3=${data.progress.pass3}%`,
-            );
-          }
-          if (data && data.state) {
-            setAnalysisStatus(data.state === 'completed' ? 'completed' : 'processing');
-            console.log(`State changed to: ${data.state}`);
-          }
-          if (data && data.fileHash) {
-            setFileHash(data.fileHash);
-          }
-          // Map state to step name
-          const stepNames = {
-            pass1: 'The Listener (DSP Analysis)',
-            pass2: 'The Architect (Structure Detection)',
-            pass3: 'The Theorist (Theory Correction)',
-            completed: 'Analysis Complete',
-            failed: 'Analysis Failed',
-          };
-          setCurrentStep(stepNames[data?.state] || data?.state || '');
-        });
-        progressUnsubscribeRef.current = unsubscribe;
-        console.log('Progress listener set up successfully');
-      } else {
-        console.warn('window.ipc.on is not available - progress updates may not work');
-      }
-
-      // Check if electronAPI is available
-      if (!window.electronAPI || !window.electronAPI.invoke) {
-        alert('Analysis is not available. Please ensure you are running in Electron.');
-        console.error('electronAPI.invoke is not available');
-        return;
-      }
-
-      // Small delay to ensure listener is ready
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      console.log('Starting analysis for:', filePath);
-      // Start analysis (userHints removed - use Analysis Lab for fine-tuning)
-      const result = await window.electronAPI.invoke('ANALYSIS:START', {
-        filePath,
-        userHints: {}, // Analysis Lab handles fine-tuning after analysis
-      });
-      console.log('Analysis result:', result);
-
-      if (result?.success) {
-        setFileHash(result.fileHash);
-        setAnalysisStatus('completed');
-        setCurrentStep('Analysis Complete');
-
-        try {
-          let analysisData = null;
-          if (window.electronAPI && window.electronAPI.invoke) {
-            console.log('Fetching analysis results for fileHash:', result.fileHash);
-            analysisData = await window.electronAPI.invoke('ANALYSIS:GET_RESULT', result.fileHash);
-          }
-
-          if (analysisData) {
-            console.log('Analysis data received:', {
-              hasData: !!analysisData,
-              hasLinearAnalysis: !!analysisData?.linear_analysis,
-              hasStructuralMap: !!analysisData?.structural_map,
-              sectionCount: analysisData?.structural_map?.sections?.length || 0,
-              eventCount: analysisData?.linear_analysis?.events?.length || 0,
-            });
-
-            setAnalysisResult(analysisData);
-            console.log('Analysis results set in state');
-
-            // Dispatch analysis data event for HarmonicGrid
-            if (analysisData?.linear_analysis || analysisData?.structural_map) {
-              window.dispatchEvent(
-                new CustomEvent('analysis:data', {
-                  detail: {
-                    linear_analysis: analysisData.linear_analysis,
-                    structural_map: analysisData.structural_map,
-                  },
-                }),
-              );
-              // Also store in window for direct access
-              window.__lastAnalysisData = {
-                linear_analysis: analysisData.linear_analysis,
-                structural_map: analysisData.structural_map,
-              };
-              console.log('Analysis data dispatched for HarmonicGrid');
-            }
-
-            if (!analysisData.linear_analysis || !analysisData.structural_map) {
-              console.error('Analysis data missing required fields!', analysisData);
-            }
-
-            await sendBlocksToArchitect(
-              result.fileHash,
-              analysisData.structural_map?.sections || [],
-            );
-          } else {
-            console.warn('No analysis data returned after analysis completion');
-          }
-        } catch (error) {
-          console.error('Error fetching analysis results:', error);
-        }
-      } else {
-        setAnalysisStatus('failed');
-        setCurrentStep('Analysis Failed');
-        alert(result?.error || 'Analysis failed');
-      }
-    } catch (error) {
-      setAnalysisStatus('failed');
-      setCurrentStep('Analysis Failed');
-      console.error('Analysis error:', error);
-      alert(`Analysis error: ${error.message}`);
-    }
-  };
+    analysisOperation.execute(filePath);
+  }, [filePath, analysisOperation]);
 
   return (
     <div className="p-5 max-w-3xl">
@@ -287,35 +294,90 @@ export default function AnalysisJobManager() {
       )}
 
       <button
+        onClick={handleFileSelect}
+        disabled={fileSelectOperation.loading}
+        className="px-5 py-2.5 text-base bg-secondary text-secondary-foreground border-none rounded-md cursor-pointer hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed mr-3"
+      >
+        {fileSelectOperation.loading ? (
+          <>
+            <LoadingSpinner size="sm" className="mr-2" />
+            Selecting...
+          </>
+        ) : (
+          'Select Audio File'
+        )}
+      </button>
+
+      <button
         onClick={handleStartAnalysis}
-        disabled={!filePath || analysisStatus === 'processing'}
+        disabled={!filePath || analysisOperation.loading}
         className="px-5 py-2.5 text-base bg-primary text-primary-foreground border-none rounded-md cursor-pointer hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {analysisStatus === 'processing' ? 'Analyzing...' : 'Start Analysis'}
+        {analysisOperation.loading ? (
+          <>
+            <LoadingSpinner size="sm" className="mr-2" />
+            Analyzing...
+          </>
+        ) : (
+          'Start Analysis'
+        )}
       </button>
 
       {analysisStatus && (
         <div className="mt-5 p-4 bg-card border border-border rounded-md">
-          <div className="mb-3 text-foreground">
-            <strong>Status:</strong> {currentStep || analysisStatus}
+          <div className="mb-3">
+            <StatusIndicator
+              status={
+                analysisStatus === 'completed'
+                  ? 'success'
+                  : analysisStatus === 'error'
+                    ? 'error'
+                    : analysisStatus === 'processing'
+                      ? 'loading'
+                      : 'info'
+              }
+              message={currentStep || analysisStatus}
+            />
           </div>
 
-          {analysisStatus === 'processing' && (
-            <div>
-              <div className="mb-2 text-foreground">
-                <strong>Overall Progress:</strong> {Math.round(progress.overall || 0)}%
-              </div>
-              <div className="w-full h-5 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary transition-all duration-300"
-                  style={{ width: `${progress.overall || 0}%` }}
-                />
+          {analysisOperation.loading && (
+            <div className="space-y-4">
+              <div>
+                <div className="flex justify-between text-sm mb-2">
+                  <span>Overall Progress</span>
+                  <span>{Math.round(progress.overall || 0)}%</span>
+                </div>
+                <ProgressBar progress={progress.overall || 0} />
               </div>
 
-              <div className="mt-4 text-xs text-muted-foreground space-y-1">
-                <div>Pass 1 (Listener): {Math.round(progress.pass1 || 0)}%</div>
-                <div>Pass 2 (Architect): {Math.round(progress.pass2 || 0)}%</div>
-                <div>Pass 3 (Theorist): {Math.round(progress.pass3 || 0)}%</div>
+              <div className="grid grid-cols-3 gap-4 text-xs text-muted-foreground">
+                <div>
+                  <div className="font-medium mb-1">Pass 1 (Listener)</div>
+                  <ProgressBar
+                    progress={progress.pass1 || 0}
+                    showPercentage={false}
+                    className="h-1"
+                  />
+                  <div className="text-center mt-1">{Math.round(progress.pass1 || 0)}%</div>
+                </div>
+                <div>
+                  <div className="font-medium mb-1">Pass 2 (Architect)</div>
+                  <ProgressBar
+                    progress={progress.pass2 || 0}
+                    showPercentage={false}
+                    className="h-1"
+                  />
+                  <div className="text-center mt-1">{Math.round(progress.pass2 || 0)}%</div>
+                </div>
+                <div>
+                  <div className="font-medium mb-1">Pass 3 (Theorist)</div>
+                  <ProgressBar
+                    progress={progress.pass3 || 0}
+                    showPercentage={false}
+                    className="h-1"
+                  />
+                  <div className="text-center mt-1">{Math.round(progress.pass3 || 0)}%</div>
+                </div>
               </div>
             </div>
           )}

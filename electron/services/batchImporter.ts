@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+const logger = require('../analysis/logger');
 
 type DiscoveredFile = {
   path: string;
@@ -41,12 +42,13 @@ function parseMcGillFormat(jsonData: any): any {
       section_label: s.sectionLabel || s.sectionType || 'unknown',
       chords: s.chords || [],
     })),
-    chords: jsonData.sections?.flatMap((s: any) => 
-      (s.chords || []).map((c: string, idx: number) => ({
-        timestamp: (s.start_ms + (idx * s.duration_ms / (s.chords?.length || 1))) / 1000,
-        chord: c,
-      }))
-    ) || [],
+    chords:
+      jsonData.sections?.flatMap((s: any) =>
+        (s.chords || []).map((c: string, idx: number) => ({
+          timestamp: (s.start_ms + (idx * s.duration_ms) / (s.chords?.length || 1)) / 1000,
+          chord: c,
+        })),
+      ) || [],
   };
 }
 
@@ -65,12 +67,13 @@ function parseNottinghamFormat(jsonData: any): any {
       section_label: s.sectionLabel || 'unknown',
       chords: s.chords || [],
     })),
-    chords: jsonData.sections?.flatMap((s: any) => 
-      (s.chords || []).map((c: string, idx: number) => ({
-        timestamp: (s.start_ms + (idx * s.duration_ms / (s.chords?.length || 1))) / 1000,
-        chord: c,
-      }))
-    ) || [],
+    chords:
+      jsonData.sections?.flatMap((s: any) =>
+        (s.chords || []).map((c: string, idx: number) => ({
+          timestamp: (s.start_ms + (idx * s.duration_ms) / (s.chords?.length || 1)) / 1000,
+          chord: c,
+        })),
+      ) || [],
   };
 }
 
@@ -124,35 +127,36 @@ function parseMozartFormat(jsonData: any): any {
 function parseLabFile(filePath: string): any {
   try {
     const content = fs.readFileSync(filePath, 'utf8');
-    const lines = content.split('\n').filter(line => line.trim());
-    
+    const lines = content.split('\n').filter((line) => line.trim());
+
     const sections: any[] = [];
     const chords: any[] = [];
     let detectedKey: string | null = null;
-    
+
     for (const line of lines) {
       const parts = line.trim().split(/\s+/);
       if (parts.length >= 3) {
         const start = parseFloat(parts[0]);
         const end = parseFloat(parts[1]);
         const label = parts.slice(2).join(' ').trim();
-        
+
         if (isNaN(start) || isNaN(end)) continue;
-        
+
         // Detect key annotations
         if (label.toLowerCase() === 'key' && parts.length >= 4) {
           detectedKey = parts[3] || null;
           continue;
         }
-        
+
         // Skip silence markers
         if (label.toLowerCase() === 'silence') continue;
-        
+
         // Check if it's a chord label (common patterns)
-        const isChord = /^[A-G][#b]?[0-9]*(m|min|maj|dim|aug|sus|add)?[0-9]*(\/[A-G][#b]?)?$/i.test(label) ||
-                       /^[IVX]+[0-9]*$/i.test(label) || // Roman numerals
-                       /^[A-G][#b]?(:|$)/i.test(label); // Simple chord notation
-        
+        const isChord =
+          /^[A-G][#b]?[0-9]*(m|min|maj|dim|aug|sus|add)?[0-9]*(\/[A-G][#b]?)?$/i.test(label) ||
+          /^[IVX]+[0-9]*$/i.test(label) || // Roman numerals
+          /^[A-G][#b]?(:|$)/i.test(label); // Simple chord notation
+
         if (isChord) {
           chords.push({
             timestamp: start,
@@ -170,10 +174,10 @@ function parseLabFile(filePath: string): any {
         }
       }
     }
-    
+
     // Extract title from filename
     const filename = path.basename(filePath, path.extname(filePath));
-    
+
     return {
       title: filename,
       artist: '',
@@ -183,7 +187,7 @@ function parseLabFile(filePath: string): any {
       chords,
     };
   } catch (err) {
-    console.error(`[BatchImporter] Failed to parse LAB file: ${filePath}`, err);
+    logger.error(`[BatchImporter] Failed to parse LAB file: ${filePath}`, err);
     return null;
   }
 }
@@ -195,9 +199,13 @@ function parseJSONFile(filePath: string): any {
   try {
     const content = fs.readFileSync(filePath, 'utf8');
     const jsonData = JSON.parse(content);
-    
+
     // Detect format by structure
-    if (jsonData.sections && Array.isArray(jsonData.sections) && jsonData.sections[0]?.start_ms !== undefined) {
+    if (
+      jsonData.sections &&
+      Array.isArray(jsonData.sections) &&
+      jsonData.sections[0]?.start_ms !== undefined
+    ) {
       // McGill/SALAMI format
       if (jsonData.source?.includes('McGill') || jsonData.source?.includes('SALAMI')) {
         return parseMcGillFormat(jsonData);
@@ -209,7 +217,7 @@ function parseJSONFile(filePath: string): any {
       // Generic format with sections (including .jcrd.json)
       return parseNottinghamFormat(jsonData);
     }
-    
+
     // Rock Corpus / Mozart format
     if (jsonData.metadata && jsonData.chords) {
       if (jsonData.metadata.source_format?.includes('Rock Corpus')) {
@@ -217,12 +225,16 @@ function parseJSONFile(filePath: string): any {
       }
       return parseMozartFormat(jsonData);
     }
-    
+
     // Check for .jcrd.json format (has sections with start_ms)
-    if (jsonData.sections && Array.isArray(jsonData.sections) && jsonData.sections[0]?.start_ms !== undefined) {
+    if (
+      jsonData.sections &&
+      Array.isArray(jsonData.sections) &&
+      jsonData.sections[0]?.start_ms !== undefined
+    ) {
       return parseMozartFormat(jsonData);
     }
-    
+
     // Fallback: try to extract basic info
     return {
       title: jsonData.title || jsonData.metadata?.title || '',
@@ -233,7 +245,7 @@ function parseJSONFile(filePath: string): any {
       chords: [],
     };
   } catch (err) {
-    console.error(`[BatchImporter] Failed to parse JSON: ${filePath}`, err);
+    logger.error(`[BatchImporter] Failed to parse JSON: ${filePath}`, err);
     return null;
   }
 }
@@ -257,12 +269,12 @@ function calculateSimilarity(str1: string, str2: string): number {
   const s2 = normalizeFilename(str2);
   if (s1 === s2) return 1.0;
   if (s1.includes(s2) || s2.includes(s1)) return 0.8;
-  
+
   // Simple substring matching
   const longer = s1.length > s2.length ? s1 : s2;
   const shorter = s1.length > s2.length ? s2 : s1;
   if (longer.includes(shorter)) return 0.7;
-  
+
   return 0.3; // Low confidence for partial matches
 }
 
@@ -275,35 +287,35 @@ export function scanLibraryDirectory(libraryRoot: string): {
 } {
   const files: DiscoveredFile[] = [];
   const datasets: Record<string, number> = {};
-  
+
   if (!fs.existsSync(libraryRoot)) {
     return { files, datasets };
   }
-  
+
   // Scan audio directory
   const audioDir = path.join(libraryRoot, 'audio');
   if (fs.existsSync(audioDir)) {
     scanDirectory(audioDir, 'audio', files, datasets);
   }
-  
+
   // Scan JSON directory
   const jsonDir = path.join(libraryRoot, 'json');
   if (fs.existsSync(jsonDir)) {
     scanDirectory(jsonDir, 'json', files, datasets);
   }
-  
+
   // Scan MIDI directory
   const midiDir = path.join(libraryRoot, 'midi');
   if (fs.existsSync(midiDir)) {
     scanDirectory(midiDir, 'midi', files, datasets);
   }
-  
+
   // Scan lyrics directory (if exists)
   const lyricsDir = path.join(libraryRoot, 'lyrics');
   if (fs.existsSync(lyricsDir)) {
     scanDirectory(lyricsDir, 'lyrics', files, datasets);
   }
-  
+
   // Also scan for lyrics files in audio/json directories (if they exist)
   if (fs.existsSync(audioDir)) {
     scanDirectory(audioDir, 'lyrics', files, datasets);
@@ -311,7 +323,7 @@ export function scanLibraryDirectory(libraryRoot: string): {
   if (fs.existsSync(jsonDir)) {
     scanDirectory(jsonDir, 'lyrics', files, datasets);
   }
-  
+
   return { files, datasets };
 }
 
@@ -327,17 +339,17 @@ function scanDirectory(
 ) {
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
-    
+
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
-      
+
       if (entry.isDirectory()) {
         // Track dataset name from directory structure
         const newDataset = datasetName || entry.name;
         scanDirectory(fullPath, type, files, datasets, newDataset);
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase();
-        
+
         if (type === 'audio' && ['.mp3', '.wav', '.flac', '.m4a', '.ogg'].includes(ext)) {
           files.push({
             path: fullPath,
@@ -349,7 +361,7 @@ function scanDirectory(
           // Check if it's a .jcrd.json file (double extension)
           const baseName = path.basename(fullPath, '.json');
           const isJcrdJson = baseName.endsWith('.jcrd');
-          
+
           const metadata = parseJSONFile(fullPath);
           files.push({
             path: fullPath,
@@ -405,7 +417,7 @@ function scanDirectory(
           } catch (e) {
             // Ignore parse errors
           }
-          
+
           files.push({
             path: fullPath,
             type: 'lyrics',
@@ -417,7 +429,7 @@ function scanDirectory(
       }
     }
   } catch (err) {
-    console.error(`[BatchImporter] Error scanning ${dir}:`, err);
+    logger.error(`[BatchImporter] Error scanning ${dir}:`, err);
   }
 }
 
@@ -427,7 +439,7 @@ function scanDirectory(
 export function matchFiles(files: DiscoveredFile[]): MatchedGroup[] {
   const groups: MatchedGroup[] = [];
   const processed = new Set<string>();
-  
+
   // Group by dataset first
   const byDataset: Record<string, DiscoveredFile[]> = {};
   for (const file of files) {
@@ -435,17 +447,19 @@ export function matchFiles(files: DiscoveredFile[]): MatchedGroup[] {
     if (!byDataset[dataset]) byDataset[dataset] = [];
     byDataset[dataset].push(file);
   }
-  
+
   // Try to match files within each dataset
   for (const [dataset, datasetFiles] of Object.entries(byDataset)) {
-    const audioFiles = datasetFiles.filter(f => f.type === 'audio');
-    const jsonFiles = datasetFiles.filter(f => f.type === 'json');
-    const midiFiles = datasetFiles.filter(f => f.type === 'midi');
-    const labFiles = datasetFiles.filter(f => f.type === 'lab');
-    const lyricsFiles = datasetFiles.filter(f => f.type === 'lyrics');
-    
-    console.log(`[BatchImporter] Dataset "${dataset}": ${audioFiles.length} audio, ${jsonFiles.length} json, ${midiFiles.length} midi, ${labFiles.length} lab, ${lyricsFiles.length} lyrics`);
-    
+    const audioFiles = datasetFiles.filter((f) => f.type === 'audio');
+    const jsonFiles = datasetFiles.filter((f) => f.type === 'json');
+    const midiFiles = datasetFiles.filter((f) => f.type === 'midi');
+    const labFiles = datasetFiles.filter((f) => f.type === 'lab');
+    const lyricsFiles = datasetFiles.filter((f) => f.type === 'lyrics');
+
+    logger.info(
+      `[BatchImporter] Dataset "${dataset}": ${audioFiles.length} audio, ${jsonFiles.length} json, ${midiFiles.length} midi, ${labFiles.length} lab, ${lyricsFiles.length} lyrics`,
+    );
+
     // Match audio files with JSON/MIDI/LAB files
     for (const audio of audioFiles) {
       const audioName = path.basename(audio.path, path.extname(audio.path));
@@ -453,12 +467,12 @@ export function matchFiles(files: DiscoveredFile[]): MatchedGroup[] {
         audio,
         confidence: 0.5,
       };
-      
+
       // Try to find matching JSON file
       for (const json of jsonFiles) {
         const jsonName = path.basename(json.path, path.extname(json.path));
         const similarity = calculateSimilarity(audioName, jsonName);
-        
+
         if (similarity > bestMatch.confidence) {
           bestMatch.json = json;
           bestMatch.confidence = similarity;
@@ -468,46 +482,46 @@ export function matchFiles(files: DiscoveredFile[]): MatchedGroup[] {
           }
         }
       }
-      
+
       // Try to find matching MIDI file
       for (const midi of midiFiles) {
         const midiName = path.basename(midi.path, path.extname(midi.path));
         const similarity = calculateSimilarity(audioName, midiName);
-        
+
         if (similarity > 0.6) {
           bestMatch.midi = midi;
           bestMatch.confidence = Math.max(bestMatch.confidence, similarity);
         }
       }
-      
+
       // Try to find matching LAB file
       for (const lab of labFiles) {
         const labName = path.basename(lab.path, path.extname(lab.path));
         const similarity = calculateSimilarity(audioName, labName);
-        
+
         if (similarity > 0.6) {
           bestMatch.lab = lab;
           bestMatch.confidence = Math.max(bestMatch.confidence, similarity);
         }
       }
-      
+
       // Try to find matching lyrics file
       for (const lyrics of lyricsFiles) {
         const lyricsName = path.basename(lyrics.path, path.extname(lyrics.path));
         const similarity = calculateSimilarity(audioName, lyricsName);
-        
+
         if (similarity > 0.6) {
           bestMatch.lyrics = lyrics;
           bestMatch.confidence = Math.max(bestMatch.confidence, similarity);
         }
       }
-      
+
       if (!processed.has(audio.path)) {
         groups.push(bestMatch);
         processed.add(audio.path);
       }
     }
-    
+
     // Add unmatched JSON files (reference datasets)
     for (const json of jsonFiles) {
       if (!processed.has(json.path)) {
@@ -520,7 +534,7 @@ export function matchFiles(files: DiscoveredFile[]): MatchedGroup[] {
         processed.add(json.path);
       }
     }
-    
+
     // Add unmatched MIDI files
     for (const midi of midiFiles) {
       if (!processed.has(midi.path)) {
@@ -532,7 +546,7 @@ export function matchFiles(files: DiscoveredFile[]): MatchedGroup[] {
       }
     }
   }
-  
+
   return groups;
 }
 
@@ -542,19 +556,19 @@ export function matchFiles(files: DiscoveredFile[]): MatchedGroup[] {
 export function getDatasetStats(libraryRoot: string): Record<string, any> {
   const { files, datasets } = scanLibraryDirectory(libraryRoot);
   const stats: Record<string, any> = {};
-  
+
   for (const [dataset, count] of Object.entries(datasets)) {
-    const datasetFiles = files.filter(f => f.dataset === dataset);
-      stats[dataset] = {
+    const datasetFiles = files.filter((f) => f.dataset === dataset);
+    stats[dataset] = {
       totalFiles: count,
-      audio: datasetFiles.filter(f => f.type === 'audio').length,
-      json: datasetFiles.filter(f => f.type === 'json').length,
-      midi: datasetFiles.filter(f => f.type === 'midi').length,
-      lab: datasetFiles.filter(f => f.type === 'lab').length,
-      lyrics: datasetFiles.filter(f => f.type === 'lyrics').length,
+      audio: datasetFiles.filter((f) => f.type === 'audio').length,
+      json: datasetFiles.filter((f) => f.type === 'json').length,
+      midi: datasetFiles.filter((f) => f.type === 'midi').length,
+      lab: datasetFiles.filter((f) => f.type === 'lab').length,
+      lyrics: datasetFiles.filter((f) => f.type === 'lyrics').length,
     };
   }
-  
+
   return stats;
 }
 
@@ -563,4 +577,3 @@ export default {
   matchFiles,
   getDatasetStats,
 };
-

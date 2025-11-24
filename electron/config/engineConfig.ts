@@ -7,6 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
+const logger = require('../analysis/logger');
 
 export interface EngineConfig {
   // Architect options (structure analysis)
@@ -67,7 +68,7 @@ function getConfigPath(): string {
  */
 export function loadConfig(): EngineConfig {
   const configPath = getConfigPath();
-  
+
   try {
     if (fs.existsSync(configPath)) {
       const fileContent = fs.readFileSync(configPath, 'utf8');
@@ -87,9 +88,9 @@ export function loadConfig(): EngineConfig {
       };
     }
   } catch (error) {
-    console.warn('[EngineConfig] Failed to load config, using defaults:', error);
+    logger.warn('[EngineConfig] Failed to load config, using defaults:', error);
   }
-  
+
   return { ...GOLDEN_DEFAULTS };
 }
 
@@ -98,26 +99,26 @@ export function loadConfig(): EngineConfig {
  */
 export function saveConfig(config: EngineConfig): { success: boolean; error?: string } {
   const configPath = getConfigPath();
-  
+
   try {
     // Ensure directory exists
     const dir = path.dirname(configPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    
+
     // Add timestamp
     const configToSave = {
       ...config,
       calibratedAt: new Date().toISOString(),
     };
-    
+
     fs.writeFileSync(configPath, JSON.stringify(configToSave, null, 2), 'utf8');
-    console.log('[EngineConfig] Saved config to:', configPath);
+    logger.info('[EngineConfig] Saved config to:', configPath);
     return { success: true };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error('[EngineConfig] Failed to save config:', errorMsg);
+    logger.error('[EngineConfig] Failed to save config:', errorMsg);
     return { success: false, error: errorMsg };
   }
 }
@@ -128,4 +129,3 @@ export function saveConfig(config: EngineConfig): { success: boolean; error?: st
 export function resetToDefaults(): { success: boolean; error?: string } {
   return saveConfig(GOLDEN_DEFAULTS);
 }
-

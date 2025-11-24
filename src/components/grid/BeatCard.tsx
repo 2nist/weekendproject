@@ -53,152 +53,161 @@ export interface BeatCardProps
 }
 
 // 3. The Component
-export const BeatCard = ({
-  className,
-  function: func,
-  selected,
-  chord,
-  roman,
-  isKick,
-  isSnare,
-  beatIndex,
-  onEdit,
-  isPlaying = false,
-  timestamp,
-  paintMode = false,
-  paintChord = null,
-  isDragging = false,
-  onPaint,
-  beat,
-  showConfidence = false,
-  confidence,
-  hasConflict = false,
-  isAttack = false,
-  isSustain = false,
-  isActive = false,
-  ...props
-}: BeatCardProps) => {
-  // Handle paint mode - trigger paint on mouse enter while dragging
-  const handleMouseEnter = (e: React.MouseEvent) => {
-    if (paintMode && isDragging && paintChord && onPaint) {
-      onPaint();
-    }
-    // Call original onMouseEnter if provided
-    if (props.onMouseEnter) {
-      props.onMouseEnter(e);
-    }
-  };
+// ✅ PERFORMANCE FIX: React.memo prevents 30,000 re-renders/sec during playback
+// Uses shallow comparison - only re-renders when props actually change
+export const BeatCard = React.memo(
+  ({
+    className,
+    function: func,
+    selected,
+    chord,
+    roman,
+    isKick,
+    isSnare,
+    beatIndex,
+    onEdit,
+    isPlaying = false,
+    timestamp,
+    paintMode = false,
+    paintChord = null,
+    isDragging = false,
+    onPaint,
+    beat,
+    showConfidence = false,
+    confidence,
+    hasConflict = false,
+    isAttack = false,
+    isSustain = false,
+    isActive = false,
+    ...props
+  }: BeatCardProps) => {
+    // Handle paint mode - trigger paint on mouse enter while dragging
+    const handleMouseEnter = (e: React.MouseEvent) => {
+      if (paintMode && isDragging && paintChord && onPaint) {
+        onPaint();
+      }
+      // Call original onMouseEnter if provided
+      if (props.onMouseEnter) {
+        props.onMouseEnter(e);
+      }
+    };
 
-  // Prevent click when painting
-  const handleClick = (e: React.MouseEvent) => {
-    if (paintMode && isDragging) {
-      e.preventDefault();
-      return;
-    }
-    if (onEdit) {
-      onEdit();
-    }
-  };
+    // Prevent click when painting
+    const handleClick = (e: React.MouseEvent) => {
+      if (paintMode && isDragging) {
+        e.preventDefault();
+        return;
+      }
+      if (onEdit) {
+        onEdit();
+      }
+    };
 
-  // Calculate opacity based on confidence when showConfidence is enabled
-  const getConfidenceOpacity = () => {
-    if (!showConfidence || confidence === undefined) return 1;
-    if (confidence > 0.9) return 1; // High confidence: fully opaque
-    if (confidence < 0.5) return 0.3; // Low confidence: ghosted
-    // Medium confidence: interpolate between 0.3 and 1
-    return 0.3 + (confidence - 0.5) * (1 - 0.3) / (0.9 - 0.5);
-  };
+    // Calculate opacity based on confidence when showConfidence is enabled
+    const getConfidenceOpacity = () => {
+      if (!showConfidence || confidence === undefined) return 1;
+      if (confidence > 0.9) return 1; // High confidence: fully opaque
+      if (confidence < 0.5) return 0.3; // Low confidence: ghosted
+      // Medium confidence: interpolate between 0.3 and 1
+      return 0.3 + ((confidence - 0.5) * (1 - 0.3)) / (0.9 - 0.5);
+    };
 
-  const confidenceOpacity = getConfidenceOpacity();
-  const confidencePercent = confidence !== undefined ? Math.round(confidence * 100) : null;
+    const confidenceOpacity = getConfidenceOpacity();
+    const confidencePercent = confidence !== undefined ? Math.round(confidence * 100) : null;
 
-  // Build tooltip text
-  const tooltipText = (() => {
-    if (paintMode && paintChord) return `Paint: ${paintChord}`;
-    if (showConfidence && confidence !== undefined) {
-      return `Confidence: ${confidencePercent}%${hasConflict ? ' (Engine Conflict!)' : ''}`;
-    }
-    return undefined;
-  })();
+    // Build tooltip text
+    const tooltipText = (() => {
+      if (paintMode && paintChord) return `Paint: ${paintChord}`;
+      if (showConfidence && confidence !== undefined) {
+        return `Confidence: ${confidencePercent}%${hasConflict ? ' (Engine Conflict!)' : ''}`;
+      }
+      return undefined;
+    })();
 
-  // Clean up chord label: remove 'major' suffix for brevity
-  const cleanChordLabel = chord ? chord.replace(/major/gi, '').trim() : null;
+    // Clean up chord label: remove 'major' suffix for brevity
+    const cleanChordLabel = chord ? chord.replace(/major/gi, '').trim() : null;
 
-  // Determine visual state: Attack, Sustain, or Rest
-  const isRest = !chord && !isAttack && !isSustain;
+    // Determine visual state: Attack, Sustain, or Rest
+    const isRest = !chord && !isAttack && !isSustain;
 
-  return (
-    <button
-      type="button"
-      onClick={handleClick}
-      onMouseEnter={handleMouseEnter}
-      className={cn(
-        beatCardVariants({ function: func || 'default', selected }),
-        // Dynamic Rhythm Borders - works on both attack and sustain
-        isKick &&
-          'border-b-[6px] border-b-music-kick shadow-[0_8px_16px_hsl(var(--music-kick)/0.3)]',
-        isSnare &&
-          'border-t-[6px] border-t-music-snare shadow-[0_-8px_16px_hsl(var(--music-snare)/0.3)]',
-        // Sustain state: dimmed and recessed
-        isSustain && 'opacity-40 brightness-75 scale-95',
-        // Active playback highlight (semi-sync)
-        isActive &&
-          'ring-2 ring-white shadow-lg scale-105 z-20 animate-pulse',
-        // Legacy isPlaying highlight (keep for compatibility)
-        isPlaying &&
-          'ring-2 ring-music-kick ring-offset-2 ring-offset-background shadow-[0_0_20px_hsl(var(--music-kick)/0.6)] scale-105 z-20',
-        // Paint mode cursor
-        paintMode && paintChord && 'cursor-crosshair',
-        // Paint mode hover effect
-        paintMode && paintChord && isDragging && 'ring-2 ring-primary ring-offset-1 ring-offset-background',
-        // Conflict warning border (use destructive color)
-        showConfidence && hasConflict && 'ring-2 ring-destructive ring-offset-1 ring-offset-background',
-        className,
-      )}
-      style={{
-        opacity: showConfidence ? confidenceOpacity : (isSustain ? 0.4 : undefined),
-        transition: showConfidence || isSustain ? 'opacity 0.2s ease-in-out' : undefined,
-      } as React.CSSProperties}
-      title={tooltipText}
-      {...props}
-    >
-      <span className="absolute top-1 left-1 text-xs font-mono opacity-50">
-        {typeof beatIndex === 'number' ? beatIndex + 1 : ''}
-      </span>
-
-      {/* Conditional Rendering based on state */}
-      {isAttack && cleanChordLabel ? (
-        // Attack: Full card with bold chord label
-        <span className="text-base font-bold tracking-tighter">{cleanChordLabel}</span>
-      ) : isSustain ? (
-        // Sustain: Dimmed card with horizontal hold line
-        <div className="w-full flex items-center justify-center">
-          <div className="h-0.5 w-3/4 bg-current opacity-60" />
-        </div>
-      ) : isRest ? (
-        // Rest: Small dot or rest symbol
-        <span className="text-xl opacity-20">•</span>
-      ) : (
-        // Fallback: Empty state
-        <span className="text-xl opacity-10">−</span>
-      )}
-
-      {/* Roman numeral - only show on attack */}
-      {roman && isAttack && (
-        <span className="absolute bottom-1 right-1 text-xs font-bold px-1 py-0.5 bg-background/60 text-foreground rounded-full backdrop-blur-sm border border-border">
-          {roman}
+    return (
+      <button
+        type="button"
+        onClick={handleClick}
+        onMouseEnter={handleMouseEnter}
+        className={cn(
+          beatCardVariants({ function: func || 'default', selected }),
+          // Dynamic Rhythm Borders - works on both attack and sustain
+          isKick &&
+            'border-b-[6px] border-b-music-kick shadow-[0_8px_16px_hsl(var(--music-kick)/0.3)]',
+          isSnare &&
+            'border-t-[6px] border-t-music-snare shadow-[0_-8px_16px_hsl(var(--music-snare)/0.3)]',
+          // Sustain state: dimmed and recessed
+          isSustain && 'opacity-40 brightness-75 scale-95',
+          // Active playback highlight (semi-sync)
+          isActive && 'ring-2 ring-white shadow-lg scale-105 z-20 animate-pulse',
+          // Legacy isPlaying highlight (keep for compatibility)
+          isPlaying &&
+            'ring-2 ring-music-kick ring-offset-2 ring-offset-background shadow-[0_0_20px_hsl(var(--music-kick)/0.6)] scale-105 z-20',
+          // Paint mode cursor
+          paintMode && paintChord && 'cursor-crosshair',
+          // Paint mode hover effect
+          paintMode &&
+            paintChord &&
+            isDragging &&
+            'ring-2 ring-primary ring-offset-1 ring-offset-background',
+          // Conflict warning border (use destructive color)
+          showConfidence &&
+            hasConflict &&
+            'ring-2 ring-destructive ring-offset-1 ring-offset-background',
+          className,
+        )}
+        style={
+          {
+            opacity: showConfidence ? confidenceOpacity : isSustain ? 0.4 : undefined,
+            transition: showConfidence || isSustain ? 'opacity 0.2s ease-in-out' : undefined,
+          } as React.CSSProperties
+        }
+        title={tooltipText}
+        {...props}
+      >
+        <span className="absolute top-1 left-1 text-xs font-mono opacity-50">
+          {typeof beatIndex === 'number' ? beatIndex + 1 : ''}
         </span>
-      )}
-      {/* Drum indicators - work on both attack and sustain */}
-      {isKick && (
-        <span className="absolute bottom-1 left-1 w-1 h-1 rounded-full bg-music-kick shadow-[0_1px_3px_hsl(var(--music-kick)/0.4)]" />
-      )}
-      {isSnare && (
-        <span className="absolute top-1 right-1 w-1 h-1 rounded-full bg-music-snare shadow-[0_1px_3px_hsl(var(--music-snare)/0.4)]" />
-      )}
-    </button>
-  );
-};
+
+        {/* Conditional Rendering based on state */}
+        {isAttack && cleanChordLabel ? (
+          // Attack: Full card with bold chord label
+          <span className="text-base font-bold tracking-tighter">{cleanChordLabel}</span>
+        ) : isSustain ? (
+          // Sustain: Dimmed card with horizontal hold line
+          <div className="w-full flex items-center justify-center">
+            <div className="h-0.5 w-3/4 bg-current opacity-60" />
+          </div>
+        ) : isRest ? (
+          // Rest: Small dot or rest symbol
+          <span className="text-xl opacity-20">•</span>
+        ) : (
+          // Fallback: Empty state
+          <span className="text-xl opacity-10">−</span>
+        )}
+
+        {/* Roman numeral - only show on attack */}
+        {roman && isAttack && (
+          <span className="absolute bottom-1 right-1 text-xs font-bold px-1 py-0.5 bg-background/60 text-foreground rounded-full backdrop-blur-sm border border-border">
+            {roman}
+          </span>
+        )}
+        {/* Drum indicators - work on both attack and sustain */}
+        {isKick && (
+          <span className="absolute bottom-1 left-1 w-1 h-1 rounded-full bg-music-kick shadow-[0_1px_3px_hsl(var(--music-kick)/0.4)]" />
+        )}
+        {isSnare && (
+          <span className="absolute top-1 right-1 w-1 h-1 rounded-full bg-music-snare shadow-[0_1px_3px_hsl(var(--music-snare)/0.4)]" />
+        )}
+      </button>
+    );
+  },
+);
+
 BeatCard.displayName = 'BeatCard';
-
-
