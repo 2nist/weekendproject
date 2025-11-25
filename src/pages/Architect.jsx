@@ -11,6 +11,8 @@ import SandboxMode from '../components/SandboxMode';
 import { HarmonicGrid } from '../components/grid/HarmonicGrid';
 import logger from '@/lib/logger';
 import NoveltyCurveVisualizer from '../components/NoveltyCurveVisualizer';
+import { useSettings } from '@/hooks/useSettings';
+import { blockLyricsToAbsolute } from '@/utils/lyrics';
 
 export default function Architect() {
   const navigate = useNavigate();
@@ -23,6 +25,9 @@ export default function Architect() {
   const [sandboxBlocks, setSandboxBlocks] = React.useState([]);
   const [analysisData, setAnalysisData] = React.useState(null);
   const [structuralMap, setStructuralMap] = React.useState(null);
+  const { settings } = useSettings();
+  const noveltyMethod = settings?.analysis_noveltyMethod || 'mad';
+  const noveltyParam = parseFloat(settings?.analysis_noveltyParam) || 1.5;
 
   // Create synthetic analysis data from sandbox blocks for grid view
   const createSyntheticAnalysisFromBlocks = (blocks) => {
@@ -33,6 +38,8 @@ export default function Architect() {
     let currentTime = 0;
     const beatsPerBar = 4; // Assume 4 beats per bar
     const secondsPerBeat = 0.5; // 120 BPM = 0.5 seconds per beat
+
+    const manualLyrics = [];
 
     blocks.forEach((block, blockIndex) => {
       const bars = block.bars || block.length || 4;
@@ -90,6 +97,13 @@ export default function Architect() {
       const bars = block.bars || block.length || 4;
       const startTime = index * bars * beatsPerBar * secondsPerBeat;
       const endTime = (index + 1) * bars * beatsPerBar * secondsPerBeat;
+      const sectionLyrics = blockLyricsToAbsolute(block, {
+        startTimeSeconds: startTime,
+        secondsPerBeat,
+      });
+      if (sectionLyrics.length) {
+        manualLyrics.push(...sectionLyrics);
+      }
 
       return {
         id: block.id || `section-${index}`,
@@ -103,6 +117,8 @@ export default function Architect() {
         harmonic_dna: block.harmonic_dna || {},
         rhythmic_dna: block.rhythmic_dna || {},
         probability_score: block.probability_score || 0.8,
+        lyrics: sectionLyrics,
+        lyric_text: block.lyric_text || null,
       };
     });
 
@@ -120,7 +136,9 @@ export default function Architect() {
           sample_rate: 44100,
           hop_length: 512,
           frame_hop_seconds: 0.0116,
+          lyric_source: manualLyrics.length ? 'blank_canvas' : 'synthetic',
         },
+        lyrics: manualLyrics,
       },
       structural_map: {
         sections,
@@ -711,7 +729,11 @@ export default function Architect() {
         <SeamlessLoader />
         <ContextualBlockStatus selectedId={selectedId} />
         {structuralMap?.debug?.noveltyCurve && (
-          <NoveltyCurveVisualizer structuralMap={structuralMap} />
+          <NoveltyCurveVisualizer
+            structuralMap={structuralMap}
+            detectionMethod={noveltyMethod}
+            detectionParam={noveltyParam}
+          />
         )}
       </aside>
     </div>

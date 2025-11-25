@@ -1,6 +1,42 @@
 const electron = require('electron');
 const path = require('path');
 const fs = require('fs');
+// Optional protocol helpers module (may not exist in some builds). Provide a
+// lightweight fallback to create stream responses for the `app://` protocol.
+let protocolHelpers = null;
+try {
+  protocolHelpers = require('./protocolHelpers');
+} catch (e) {
+  // Fallback implementation
+  protocolHelpers = {
+    createStreamResponse: (filePath, /* requestHeaders */ _reqHeaders = {}) => {
+      // Determine a minimal content-type map
+      const ext = String(path.extname(filePath) || '').toLowerCase();
+      const mimeMap = {
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.flac': 'audio/flac',
+        '.m4a': 'audio/mp4',
+        '.ogg': 'audio/ogg',
+        '.aac': 'audio/aac',
+        '.mid': 'audio/midi',
+      };
+      const contentType = mimeMap[ext] || 'application/octet-stream';
+      let stat = null;
+      try {
+        stat = fs.statSync(filePath);
+      } catch (err) {
+        return { statusCode: 404, headers: {}, stream: null };
+      }
+      const stream = fs.createReadStream(filePath);
+      const headers = {
+        'Content-Type': contentType,
+        'Content-Length': stat.size,
+      };
+      return { statusCode: 200, headers, stream };
+    },
+  };
+}
 const db = require('./db');
 const logger = require('./analysis/logger');
 const midiListener = require('./midiListener');
@@ -174,9 +210,18 @@ const ipcMain = electron.ipcMain;
 try {
   // This must be called before app.whenReady()
   const { protocol } = electron;
+  const privilegedFlags = {
+    standard: true,
+    secure: true,
+    supportFetchAPI: true,
+    corsEnabled: true,
+    stream: true,
+    bypassCSP: true,
+    allowServiceWorkers: true,
+  };
   protocol.registerSchemesAsPrivileged([
-    { scheme: 'app', privileges: { secure: true, supportFetchAPI: true, stream: true } },
-    { scheme: 'media', privileges: { secure: true, supportFetchAPI: true, stream: true } },
+    { scheme: 'app', privileges: privilegedFlags },
+    { scheme: 'media', privileges: privilegedFlags },
   ]);
   logger.info('[MAIN] Registered privileged schemes: app, media');
 } catch (e) {
@@ -278,6 +323,36 @@ function createWindow() {
           mainWindow.loadURL(devUrl);
           mainWindow.webContents.openDevTools({ mode: 'detach' });
 
+          // In development, forward main-process logs to the renderer so DevTools
+          // (and Console Ninja) can display them alongside renderer logs.
+          try {
+            const isDevLocal =
+              process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
+            if (isDevLocal && logger && typeof logger.setForwarder === 'function') {
+              logger.setForwarder((level, args) => {
+                try {
+                  const payload = {
+                    level: level || 'log',
+                    args: Array.isArray(args) ? args : [args],
+                    ts: Date.now(),
+                  };
+                  if (
+                    mainWindow &&
+                    mainWindow.webContents &&
+                    !mainWindow.webContents.isDestroyed()
+                  ) {
+                    mainWindow.webContents.send('MAIN:LOG', payload);
+                  }
+                } catch (e) {
+                  // swallow - forwarding must never break main process
+                }
+              });
+              logger.debug('[MAIN] logger forwarder set to renderer');
+            }
+          } catch (e) {
+            logger.warn('[MAIN] failed to set logger forwarder:', e?.message || e);
+          }
+
           mainWindow.webContents.once('devtools-opened', () => {
             logger.debug('[MAIN] DevTools opened - configuring to prevent auto-reload');
           });
@@ -319,6 +394,12 @@ function createWindow() {
   mainWindow.on('closed', () => {
     logger.info('[MAIN] mainWindow closed');
     try {
+      if (logger && typeof logger.clearForwarder === 'function') {
+        try {
+          logger.clearForwarder();
+          logger.debug('[MAIN] logger forwarder cleared');
+        } catch (e) {}
+      }
       mainWindow = null;
     } catch (e) {}
   });
@@ -392,9 +473,65 @@ app.whenReady().then(async () => {
 
       const serveFile = (filePath) => {
         try {
-          if (!fs.existsSync(filePath)) return false;
-          const res = protocolHelpers.createStreamResponse(filePath, request.headers || {});
-          callback({ statusCode: res.statusCode, headers: res.headers, data: res.stream });
+          if (!fs.existsSync(filePath)) {
+            logger.error('[APP PROTOCOL] serveFile: File not found:', filePath);
+            return false;
+          }
+          const stat = fs.statSync(filePath);
+          const total = stat.size;
+          const ext = path.extname(filePath).toLowerCase().replace('.', '');
+          const mimeTypes = {
+            mp3: 'audio/mpeg',
+            m4a: 'audio/mp4',
+            mp4: 'video/mp4',
+            wav: 'audio/wav',
+            ogg: 'audio/ogg',
+            flac: 'audio/flac',
+            webm: 'audio/webm',
+          };
+          const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+          // Support Range requests for seeking/partial reads (required by Chromium media)
+          const rangeHeader = request.headers && (request.headers.Range || request.headers.range);
+          if (rangeHeader) {
+            const matches = String(rangeHeader).match(/bytes=(\d+)-(\d+)?/);
+            if (matches) {
+              const start = Number(matches[1]);
+              const end = matches[2] ? Number(matches[2]) : total - 1;
+              const chunkSize = end - start + 1;
+              logger.debug(
+                '[APP PROTOCOL] Partial content requested:',
+                start,
+                end,
+                'total:',
+                total,
+              );
+              const stream = fs.createReadStream(filePath, { start, end });
+              const headers = {
+                'Content-Type': contentType,
+                'Content-Range': `bytes ${start}-${end}/${total}`,
+                'Accept-Ranges': 'bytes',
+                'Content-Length': String(chunkSize),
+              };
+              callback({ statusCode: 206, headers, data: stream });
+              return true;
+            }
+          }
+
+          // Full content
+          const stream = fs.createReadStream(filePath);
+          const headers = {
+            'Content-Type': contentType,
+            'Content-Length': String(total),
+            'Accept-Ranges': 'bytes',
+          };
+          logger.debug(
+            '[APP PROTOCOL] serveFile: Serving file:',
+            filePath,
+            'Content-Type:',
+            contentType,
+          );
+          callback({ statusCode: 200, headers, data: stream });
           return true;
         } catch (e) {
           logger.error('[APP PROTOCOL] serveFile error:', e?.message || e);
@@ -425,25 +562,48 @@ app.whenReady().then(async () => {
         return;
       }
 
-      // Strategy 2: Lookup by fileHash in AudioAnalysis table
-      try {
-        const analysisStmt = database.prepare(
-          'SELECT file_path FROM AudioAnalysis WHERE file_hash = ?',
-        );
-        analysisStmt.bind([url]);
-        if (analysisStmt.step()) {
-          const row = analysisStmt.getAsObject();
-          const audioPath = row.file_path;
-          logger.debug('[APP PROTOCOL] [Strategy 2] Found in AudioAnalysis table:', audioPath);
-          analysisStmt.free();
-          if (audioPath && serveFile(audioPath)) return;
+      // Strategy 2: Lookup by fileHash in AudioAnalysis table (support optional extension)
+      const tryServeHash = (hashLike) => {
+        if (!hashLike) return false;
+        const trimmed = hashLike.replace(/\/+$/, '');
+        const normalizedHash = trimmed.replace(/\.[a-z0-9]+$/i, '');
+        if (!/^[a-f0-9]{32,128}$/i.test(normalizedHash)) {
+          logger.debug('[APP PROTOCOL] Not a hash candidate:', hashLike);
+          return false;
         }
-        analysisStmt.free();
-      } catch (dbErr) {
-        logger.warn(
-          '[APP PROTOCOL] [Strategy 2] AudioAnalysis table lookup failed:',
-          dbErr.message,
-        );
+        try {
+          const analysisStmt = database.prepare(
+            'SELECT file_path FROM AudioAnalysis WHERE file_hash = ?',
+          );
+          analysisStmt.bind([normalizedHash]);
+          let served = false;
+          if (analysisStmt.step()) {
+            const row = analysisStmt.getAsObject();
+            const audioPath = row.file_path;
+            logger.debug(
+              '[APP PROTOCOL] [Strategy 2] Found in AudioAnalysis table:',
+              audioPath,
+              '(hash:',
+              normalizedHash,
+              ')',
+            );
+            if (audioPath && serveFile(audioPath)) {
+              served = true;
+            }
+          }
+          analysisStmt.free();
+          return served;
+        } catch (dbErr) {
+          logger.warn(
+            '[APP PROTOCOL] [Strategy 2] AudioAnalysis table lookup failed:',
+            dbErr?.message || dbErr,
+          );
+          return false;
+        }
+      };
+
+      if (tryServeHash(url)) {
+        return;
       }
 
       // Strategy 3: Project-based format (app://project-id/song.mp3)
@@ -1339,6 +1499,38 @@ async function startFullAnalysis(filePath, userHints = {}, projectId = null) {
       database &&
         database.run &&
         database.run('UPDATE Projects SET analysis_id = ? WHERE id = ?', [analysisId, projectId]);
+      // After commit, attempt to fetch lyrics for the project and persist them
+      try {
+        const lyricsService = require('./services/lyrics');
+        if (lyricsService && typeof lyricsService.fetchLyrics === 'function') {
+          const artistName = metadata?.artist || null;
+          const titleName = metadata?.title || null;
+          const albumName = metadata?.album || null;
+          const duration = linear_analysis?.metadata?.duration_seconds || null;
+          if (artistName && titleName) {
+            const lres = await lyricsService.fetchLyrics(
+              artistName,
+              titleName,
+              albumName,
+              duration,
+            );
+            if (lres) {
+              try {
+                db.updateProjectLyrics(projectId, JSON.stringify(lres));
+                logger.info('[MAIN] Persisted lyrics for project', projectId);
+              } catch (e) {
+                logger.warn(
+                  '[MAIN] Failed to persist lyrics for project',
+                  projectId,
+                  e?.message || e,
+                );
+              }
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn('[MAIN] Lyrics fetch failed after analysis:', err?.message || err);
+      }
     }
 
     tracker.complete();
@@ -2319,18 +2511,9 @@ registerIpcHandler('ARCHITECT:UPDATE_BLOCKS', async (event, blocks = []) => {
 });
 
 // Manual boundary insertion (prototype). Accepts a frame index and echoes back.
-registerIpcHandler('ARCHITECT:FORCE_SPLIT', async (event, { frame }) => {
-  try {
-    if (typeof frame !== 'number' || frame < 0) {
-      return { success: false, error: 'Invalid frame index' };
-    }
-    logger.info('[ARCHITECT:FORCE_SPLIT] Requested manual split at frame', frame);
-    // Prototype: In a future version, load current analysis, inject boundary, recompute clusters.
-    return { success: true, insertedFrame: frame };
-  } catch (error) {
-    logger.error('[ARCHITECT:FORCE_SPLIT] Error:', error);
-    return { success: false, error: error.message };
-  }
+const architectHandlers = require('./handlers/architect');
+registerIpcHandler('ARCHITECT:FORCE_SPLIT', async (event, args = {}) => {
+  return await architectHandlers.forceSplitHandler(args);
 });
 
 // Convert analysis results to blocks format for Architect view

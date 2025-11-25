@@ -1,5 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const logger = require('./analysis/logger');
+
+// Lightweight preload logger shim — avoid requiring the main-process logger here
+// because the preload bundle runs in an isolated sandbox during dev and
+// bundlers may fail to resolve main-only modules. Use console instead.
+const logger = {
+  debug: (...args) => console.debug('[preload]', ...args),
+  info: (...args) => console.info('[preload]', ...args),
+  warn: (...args) => console.warn('[preload]', ...args),
+  error: (...args) => console.error('[preload]', ...args),
+};
 
 contextBridge.exposeInMainWorld('ipc', {
   send: (channel, data) => {
@@ -43,3 +52,31 @@ contextBridge.exposeInMainWorld('electron', {
   getLyrics: (payload) => ipcRenderer.invoke('LYRICS:GET', payload),
 });
 logger.debug('[preload] electron compatibility API exposed');
+
+// Re-emit main-process logs into the renderer console in development so DevTools
+// (and Console Ninja) can capture them as if they originated in the renderer.
+try {
+  const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
+  const enableLegacyPreloadLogs =
+    process.env.LEGACY_PRELOAD_LOGS === '1' || process.env.LEGACY_PRELOAD_LOGS === 'true';
+  if (isDev && enableLegacyPreloadLogs) {
+    ipcRenderer.on('MAIN:LOG', (event, payload) => {
+      try {
+        if (!payload) return;
+        const { level = 'log', args = [] } = payload;
+        const method =
+          console[level] && typeof console[level] === 'function' ? console[level] : console.log;
+        if (Array.isArray(args)) {
+          method.call(console, '[MAIN]', ...args);
+        } else {
+          method.call(console, '[MAIN]', args);
+        }
+      } catch (e) {
+        console.error('[preload] failed to re-emit MAIN:LOG', e);
+      }
+    });
+    logger.debug('[preload] MAIN:LOG legacy console re-emitter enabled');
+  }
+} catch (e) {
+  logger.warn('[preload] failed to register MAIN:LOG re-emitter', e?.message || e);
+}

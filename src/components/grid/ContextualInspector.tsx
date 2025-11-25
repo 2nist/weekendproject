@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getNoveltyStatsForSection, getKeyChangeForSection } from '@/utils/novelty';
 import { Button } from '@/components/ui/button';
 import { X, Trash2, Copy, Scissors } from 'lucide-react';
 
@@ -21,6 +22,10 @@ interface ContextualInspectorProps {
   onDuplicateSection?: (sectionId: string) => void;
   onSplitSection?: (sectionId: string) => void;
   onChordChange?: (chord: string | null) => void;
+  sections?: any[];
+  noveltyCurve?: number[];
+  noveltyMethod?: 'mad' | 'percentile';
+  noveltyParam?: number;
 }
 
 export const ContextualInspector: React.FC<ContextualInspectorProps> = ({
@@ -32,6 +37,10 @@ export const ContextualInspector: React.FC<ContextualInspectorProps> = ({
   onDuplicateSection,
   onSplitSection,
   onChordChange,
+  sections = [],
+  noveltyCurve = [],
+  noveltyMethod = 'mad',
+  noveltyParam = 1.5,
 }) => {
   const [chordValue, setChordValue] = useState('');
   const [functionValue, setFunctionValue] = useState('');
@@ -39,6 +48,10 @@ export const ContextualInspector: React.FC<ContextualInspectorProps> = ({
   const [hasSnare, setHasSnare] = useState(false);
   const [sectionLabel, setSectionLabel] = useState('');
   const [sectionColor, setSectionColor] = useState('gray');
+
+  // Summary fields
+  const [noveltySummary, setNoveltySummary] = useState<any>(null);
+  const [keySummary, setKeySummary] = useState<any>(null);
 
   // Update local state when selection changes
   useEffect(() => {
@@ -57,6 +70,19 @@ export const ContextualInspector: React.FC<ContextualInspectorProps> = ({
       const section = selected.data;
       setSectionLabel(section.section_label || section.label || '');
       setSectionColor(section.color || 'gray');
+      if (sections && noveltyCurve && sections.length) {
+        const idx = sections.findIndex((s) => s.section_id === (section.section_id || section.id));
+        const stats = getNoveltyStatsForSection(
+          section,
+          noveltyCurve,
+          0.1,
+          noveltyMethod,
+          noveltyParam,
+        );
+        const keyChange = getKeyChangeForSection(sections, idx);
+        setNoveltySummary(stats);
+        setKeySummary(keyChange);
+      }
     }
   }, [selected, onChordChange]);
 
@@ -339,6 +365,88 @@ export const ContextualInspector: React.FC<ContextualInspectorProps> = ({
                 </div>
               </div>
             )}
+            {/* Summary block: novelty & key-change */}
+            <div className="mt-3 p-3 bg-slate-800 border border-slate-700 rounded">
+              <div className="flex justify-between items-center mb-2">
+                <div className="text-xs text-slate-400">Summary</div>
+                <div className="text-xs text-slate-500">Insights</div>
+              </div>
+              {noveltySummary ? (
+                <div className="text-sm text-slate-200 mb-1">
+                  <strong>Novelty Peak:</strong> {noveltySummary.peakValue.toFixed(3)} @{' '}
+                  {noveltySummary.peakTime.toFixed(2)}s
+                </div>
+              ) : (
+                <div className="text-sm text-slate-500 mb-1">Novelty: N/A</div>
+              )}
+              {/* Sparkline of section novelty */}
+              {noveltySummary?.withinRange && noveltySummary.withinRange.length > 0 && (
+                <div className="pt-2">
+                  <svg viewBox="0 0 160 32" preserveAspectRatio="none" className="w-full h-8">
+                    <polyline
+                      fill="none"
+                      stroke="#60a5fa"
+                      strokeWidth="1.5"
+                      points={noveltySummary.withinRange
+                        .map((v: number, i: number) => {
+                          const x = (i / (noveltySummary.withinRange.length - 1)) * 160;
+                          const max = Math.max(...noveltySummary.withinRange, 1);
+                          const y = 32 - (v / max) * 28 - 2;
+                          return `${x.toFixed(2)},${y.toFixed(2)}`;
+                        })
+                        .join(' ')}
+                    />
+                  </svg>
+                </div>
+              )}
+              {noveltySummary?.significantPeaks && noveltySummary.significantPeaks.length > 0 && (
+                <div className="mt-3">
+                  <div className="text-xs text-slate-400 mb-2">Significant peaks</div>
+                  <div className="flex flex-col gap-2">
+                    {noveltySummary.significantPeaks.map((p: any, idx: number) => (
+                      <div key={`sig-${idx}`} className="flex items-center justify-between gap-2">
+                        <div className="text-sm text-slate-200">
+                          {p.time.toFixed(2)}s ({p.value.toFixed(3)})
+                        </div>
+                        <div>
+                          <Button
+                            size="sm"
+                            onClick={async () => {
+                              if (onSplitSection && selected?.type === 'section') {
+                                onSplitSection(selected.data.section_id || selected.data.id);
+                              }
+                              try {
+                                if (window?.electronAPI?.invoke) {
+                                  await window.electronAPI.invoke('ARCHITECT:FORCE_SPLIT', {
+                                    frame: p.frame,
+                                  });
+                                }
+                              } catch (e) {
+                                console.warn('Split invoke failed', e);
+                              }
+                            }}
+                          >
+                            Suggest Split
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {keySummary && keySummary.changes && keySummary.changes.length > 0 ? (
+                <div className="text-sm text-slate-200">
+                  Key Changes:
+                  <ul className="list-disc ml-4 mt-2">
+                    {keySummary.changes.map((c: string, i: number) => (
+                      <li key={`kc-${i}`}>{c}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <div className="text-sm text-slate-500">Key: no detected change</div>
+              )}
+            </div>
           </>
         )}
       </div>

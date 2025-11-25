@@ -13,13 +13,18 @@ const LOG_LEVELS = {
 };
 
 // Get log level from environment or default to INFO
+const isDebugMode = process.env.DEBUG_MODE === '1' || process.env.DEBUG_MODE === 'true';
+
 const getLogLevel = () => {
-  if (process.env.DEBUG_MODE === '1' || process.env.DEBUG_MODE === 'true') {
+  if (isDebugMode) {
     return LOG_LEVELS.DEBUG;
   }
   if (process.env.LOG_LEVEL) {
-    const level = LOG_LEVELS[process.env.LOG_LEVEL.toUpperCase()];
-    if (level !== undefined) return level;
+    const envLevel = LOG_LEVELS[process.env.LOG_LEVEL.toUpperCase()];
+    if (envLevel !== undefined) {
+      // Never elevate to DEBUG without DEBUG_MODE; allow WARN/ERROR overrides.
+      return Math.min(envLevel, LOG_LEVELS.INFO);
+    }
   }
   return LOG_LEVELS.INFO; // Default: INFO
 };
@@ -70,13 +75,16 @@ class Logger {
       emitToForwarder('DEBUG', ['[Pass 1]', ...args]);
     } else {
       // Only show important Pass 1 messages at INFO level
-      if (args[0] && typeof args[0] === 'string' && (
-        args[0].includes('Starting') ||
-        args[0].includes('Complete') ||
-        args[0].includes('Error') ||
-        args[0].includes('SUCCESS') ||
-        args[0].includes('WARNING')
-      )) {
+      if (
+        args[0] &&
+        typeof args[0] === 'string' &&
+        (args[0].includes('Starting') ||
+          args[0].includes('Complete') ||
+          args[0].includes('Error') ||
+          args[0].includes('SUCCESS') ||
+          args[0].includes('WARNING') ||
+          args[0].includes('[PYTHON'))
+      ) {
         this.info('[Pass 1]', ...args);
         emitToForwarder('INFO', ['[Pass 1]', ...args]);
       }
@@ -89,11 +97,13 @@ class Logger {
       emitToForwarder('DEBUG', ['[Pass 2]', ...args]);
     } else {
       // Only show important Pass 2 messages
-      if (args[0] && typeof args[0] === 'string' && (
-        args[0].includes('Starting') ||
-        args[0].includes('Complete') ||
-        args[0].includes('sections:')
-      )) {
+      if (
+        args[0] &&
+        typeof args[0] === 'string' &&
+        (args[0].includes('Starting') ||
+          args[0].includes('Complete') ||
+          args[0].includes('sections:'))
+      ) {
         this.info('[Pass 2]', ...args);
         emitToForwarder('INFO', ['[Pass 2]', ...args]);
       }
@@ -126,7 +136,11 @@ function emitToForwarder(level, args = []) {
         // Try to clone via JSON to avoid circular
         return JSON.parse(JSON.stringify(a));
       } catch (e) {
-        try { return String(a); } catch (e2) { return '[unserializable]'; }
+        try {
+          return String(a);
+        } catch (e2) {
+          return '[unserializable]';
+        }
       }
     });
     forwarderFn(level, safeArgs);
@@ -140,5 +154,3 @@ const logger = new Logger();
 logger.setForwarder = setForwarder;
 logger.clearForwarder = clearForwarder;
 module.exports = logger;
-
-

@@ -14,15 +14,29 @@ interface LyricsState {
   error: string | null;
 }
 
-export function useLyrics(artist: string, title: string, album?: string, duration?: number) {
+interface UseLyricsOptions {
+  enabled?: boolean;
+}
+
+export function useLyrics(
+  artist: string,
+  title: string,
+  album?: string,
+  duration?: number,
+  options?: UseLyricsOptions,
+) {
   const [lyrics, setLyrics] = useState<LyricsState>({
     lines: [],
     source: '',
     loading: false,
     error: null,
   });
+  const enabled = options?.enabled ?? true;
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     // Avoid fetching when metadata is invalid or default placeholders
     if (!artist || !title) return;
     if (
@@ -67,7 +81,7 @@ export function useLyrics(artist: string, title: string, album?: string, duratio
     };
 
     fetchLyrics();
-  }, [artist, title, album, duration]);
+  }, [artist, title, album, duration, enabled]);
 
   return lyrics;
 }

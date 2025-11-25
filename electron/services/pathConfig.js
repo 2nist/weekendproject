@@ -11,7 +11,16 @@ const logger = require('../analysis/logger');
 
 class PathConfig {
   constructor() {
-    this.userDataPath = app.getPath('userData');
+    // `app` may not be available in test or non-Electron environments. Fallback gracefully.
+    try {
+      this.userDataPath = app && typeof app.getPath === 'function' ? app.getPath('userData') : null;
+    } catch (err) {
+      this.userDataPath = null;
+    }
+    if (!this.userDataPath) {
+      // Prefer environment-provided override for testability, fallback to os.tmpdir
+      this.userDataPath = process.env.PROGRESSION_USERDATA || os.tmpdir();
+    }
     this.configPath = path.join(this.userDataPath, 'path-config.json');
     this.config = this.loadConfig();
   }

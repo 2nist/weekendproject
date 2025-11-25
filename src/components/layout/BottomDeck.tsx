@@ -3,6 +3,7 @@ import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-rea
 import { AudioEngine, AudioEngineRef } from '../player/AudioEngine';
 import { useEditor } from '../../contexts/EditorContext';
 import { cn } from '@/lib/utils';
+import { buildAppProtocolUrl } from '@/utils/audio';
 
 interface BottomDeckProps {
   className?: string;
@@ -27,6 +28,11 @@ export const BottomDeck: React.FC<BottomDeckProps> = ({
   // Get audio source from EditorContext
   const songData = state.songData;
   const filePath = songData?.file_path || songData?.metadata?.file_path;
+  const fileHash = songData?.fileHash || songData?.file_hash;
+  const metadataExtension =
+    songData?.metadata?.file_extension ||
+    songData?.metadata?.fileExtension ||
+    songData?.metadata?.format;
 
   // Debug logging (throttled)
   React.useEffect(() => {
@@ -34,15 +40,29 @@ export const BottomDeck: React.FC<BottomDeckProps> = ({
       console.log('[BottomDeck] Audio data:', {
         hasSongData: !!songData,
         hasFilePath: !!filePath,
+        hasFileHash: !!fileHash,
         filePath: filePath,
+        fileHash: fileHash,
         songDataKeys: songData ? Object.keys(songData) : [],
       });
     }, 1000);
     return () => clearTimeout(timer);
-  }, [!!songData, !!filePath]);
+  }, [!!songData, !!filePath, !!fileHash]);
 
   // Convert file path to proper URL format
-  const getAudioUrl = (path: string | undefined): string | undefined => {
+  const getAudioUrl = (
+    hash: string | undefined,
+    path: string | undefined,
+    extensionHint?: string | null,
+  ): string | undefined => {
+    if (hash) {
+      // Prefer app:// protocol with fileHash for better reliability
+      return buildAppProtocolUrl(hash, {
+        filePath: path,
+        metadataExtension: extensionHint,
+      });
+    }
+
     if (!path) return undefined;
 
     // If already a media:// or http(s):// URL, return as-is
@@ -62,7 +82,7 @@ export const BottomDeck: React.FC<BottomDeckProps> = ({
     return `media://${normalized}`;
   };
 
-  const audioUrl = getAudioUrl(filePath);
+  const audioUrl = getAudioUrl(fileHash, filePath, metadataExtension);
 
   // Debug logging - show what URL we're using
   React.useEffect(() => {

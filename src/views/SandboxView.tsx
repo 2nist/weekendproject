@@ -13,13 +13,16 @@ import { AudioEngine, AudioEngineRef } from '@/components/player/AudioEngine';
 import { ContextualInspector } from '@/components/grid/ContextualInspector';
 import { NavigationTimeline } from '@/components/grid/NavigationTimeline';
 import LyricsPanel from '@/components/lyrics/LyricsPanel';
+import { flattenSectionLyrics } from '@/utils/lyrics';
 import {
   handleAsyncError,
   useAsyncOperation,
   showErrorToast,
   AppError,
 } from '@/utils/errorHandling';
+import { buildAppProtocolUrl } from '@/utils/audio';
 import logger from '@/lib/logger';
+import { useSettings } from '@/hooks/useSettings';
 import type { SelectionTarget } from '@/types/editor';
 
 export const SandboxView = ({ data }: { data: any }) => {
@@ -196,6 +199,80 @@ export const SandboxView = ({ data }: { data: any }) => {
   const artist = metadata?.artist || 'Unknown Artist';
   const title = metadata?.title || metadata?.file_name || 'Unknown Track';
   const album = metadata?.album;
+  const manualLyrics = React.useMemo(
+    () => flattenSectionLyrics(songData?.structural_map?.sections || null),
+    [songData?.structural_map?.sections],
+  );
+
+  // Get user-set detection method & param from settings (persisted DB)
+  const { settings: appSettings } = useSettings();
+  const noveltyMethod = appSettings?.analysis_noveltyMethod || 'mad';
+  const noveltyParam = parseFloat(appSettings?.analysis_noveltyParam) || 1.5;
+
+  const formatDuration = useCallback((seconds: number) => {
+    if (!seconds || typeof seconds !== 'number') return null;
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60)
+      .toString()
+      .padStart(2, '0');
+    return `${mins}:${secs}`;
+  }, []);
+
+  const formatConfidence = useCallback((value: number | string | undefined | null) => {
+    if (value === undefined || value === null) return null;
+    if (typeof value === 'number') {
+      const normalized = value <= 1 ? value * 100 : value;
+      return `${Math.round(normalized)}%`;
+    }
+    if (typeof value === 'string') {
+      return value.toUpperCase();
+    }
+    return null;
+  }, []);
+
+  const contextChips = React.useMemo(() => {
+    const chips: { key: string; label: string; value: string }[] = [];
+    const trackTitle = metadata?.title || metadata?.file_name || null;
+    const artistName = metadata?.artist || null;
+    const keyLabel =
+      songData?.harmonic_context?.global_key?.primary_key || metadata?.detected_key || null;
+    const formattedDuration = duration ? formatDuration(duration) : null;
+    const confidenceRaw =
+      songData?.analysis_confidence ||
+      songData?.structural_map?.confidence ||
+      metadata?.confidence ||
+      null;
+    const confidenceLabel = formatConfidence(confidenceRaw);
+
+    if (trackTitle) {
+      chips.push({ key: 'track', label: 'Track', value: trackTitle });
+    }
+    if (artistName) {
+      chips.push({ key: 'artist', label: 'Artist', value: artistName });
+    }
+    if (keyLabel) {
+      chips.push({ key: 'key', label: 'Key', value: keyLabel });
+    }
+    if (formattedDuration) {
+      chips.push({ key: 'duration', label: 'Duration', value: formattedDuration });
+    }
+    if (confidenceLabel) {
+      chips.push({ key: 'confidence', label: 'Confidence', value: confidenceLabel });
+    }
+    return chips;
+  }, [
+    metadata?.artist,
+    metadata?.confidence,
+    metadata?.detected_key,
+    metadata?.file_name,
+    metadata?.title,
+    duration,
+    formatConfidence,
+    formatDuration,
+    songData?.analysis_confidence,
+    songData?.harmonic_context?.global_key?.primary_key,
+    songData?.structural_map?.confidence,
+  ]);
 
   // Expose current fileHash globally for AnalysisTuner to consume
   useEffect(() => {
@@ -207,11 +284,20 @@ export const SandboxView = ({ data }: { data: any }) => {
 
   // Get audio file path from analysis data
   useEffect(() => {
-    // Priority 1: Use fileHash for lookup (most reliable)
     const fileHash = songData?.fileHash || songData?.file_hash;
+    const filePath = songData?.file_path || songData?.metadata?.file_path || songData?.filePath;
+    const metadataExtension =
+      songData?.metadata?.file_extension ||
+      songData?.metadata?.fileExtension ||
+      songData?.metadata?.format;
+
+    // Priority 1: Use fileHash for lookup (most reliable)
     if (fileHash) {
-      const fileUrl = `app://${fileHash}`;
-      if (fileUrl !== audioSrc) {
+      const fileUrl = buildAppProtocolUrl(fileHash, {
+        filePath,
+        metadataExtension,
+      });
+      if (fileUrl && fileUrl !== audioSrc) {
         logger.debug('[SandboxView] Setting audio src from fileHash:', fileUrl);
         setAudioSrc(fileUrl);
       }
@@ -219,9 +305,7 @@ export const SandboxView = ({ data }: { data: any }) => {
     }
 
     // Priority 2: Use direct file path as fallback
-    const filePath = songData?.file_path || songData?.metadata?.file_path || songData?.filePath;
     if (filePath) {
-      // Convert to app:// protocol for Electron (handles local file access securely)
       let normalized = filePath.replace(/\\/g, '/');
       const fileUrl = `app://${normalized}`;
       if (fileUrl !== audioSrc) {
@@ -243,6 +327,9 @@ export const SandboxView = ({ data }: { data: any }) => {
     songData?.file_path,
     songData?.metadata?.file_path,
     songData?.filePath,
+    songData?.metadata?.file_extension,
+    songData?.metadata?.fileExtension,
+    songData?.metadata?.format,
     audioSrc,
   ]);
 
@@ -484,6 +571,22 @@ export const SandboxView = ({ data }: { data: any }) => {
         {audioSrc ? 'Loaded' : 'None'}
       </div>
 
+      {contextChips.length > 0 && (
+        <div className="px-6 py-3 border-b border-border bg-muted/30 flex flex-wrap gap-3">
+          {contextChips.map((chip) => (
+            <div
+              key={chip.key}
+              className="px-3 py-1 rounded-full bg-card/80 border border-border text-xs flex items-center gap-2"
+            >
+              <span className="uppercase tracking-widest text-[10px] text-muted-foreground">
+                {chip.label}
+              </span>
+              <span className="font-medium text-foreground">{chip.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-center h-16 gap-4 px-6 border-b border-border bg-card/50 backdrop-blur">
         {/* Play/Pause Button */}
         <Button
@@ -703,6 +806,10 @@ export const SandboxView = ({ data }: { data: any }) => {
             // TODO: Implement section splitting
             logger.debug('Split section:', sectionId);
           }}
+          sections={sections}
+          noveltyCurve={noveltyCurve}
+          noveltyMethod={noveltyMethod}
+          noveltyParam={noveltyParam}
         />
 
         {/* Lyrics Panel Sidebar */}
@@ -713,6 +820,8 @@ export const SandboxView = ({ data }: { data: any }) => {
             album={album}
             duration={duration}
             currentTime={currentTime}
+            manualLines={manualLyrics}
+            manualSource={manualLyrics.length ? 'Blank Canvas Draft' : undefined}
           />
         </div>
       </div>

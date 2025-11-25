@@ -1,4 +1,6 @@
 import React, { useRef, useMemo, useCallback, useState, useEffect } from 'react';
+import { useSettings } from '@/hooks/useSettings';
+import { findSignificantPeaks } from '@/utils/novelty';
 
 interface Section {
   section_id: string;
@@ -49,7 +51,7 @@ export const NavigationTimeline: React.FC<NavigationTimelineProps> = ({
       const start = section.time_range?.start_time || 0;
       const end = section.time_range?.end_time || duration;
       const label = (section.section_label || '').toLowerCase();
-      
+
       // Determine color based on section label
       let color = SECTION_COLORS.default;
       if (label.includes('verse')) color = SECTION_COLORS.verse;
@@ -80,12 +82,26 @@ export const NavigationTimeline: React.FC<NavigationTimelineProps> = ({
     return Math.min((time / duration) * 100, 100);
   }, [currentTime, duration, isDragging, dragPosition]);
 
+  // Get persisted detection method & param from settings
+  const { settings } = useSettings();
+  const detectionMethod = settings?.analysis_noveltyMethod || 'mad';
+  const detectionParam = parseFloat(settings?.analysis_noveltyParam) || 1.5;
+
+  // Determine significant peaks across the whole curve using persisted settings
+  const significantPeakFrames = useMemo(() => {
+    try {
+      return findSignificantPeaks(noveltyCurve, detectionMethod as any, detectionParam);
+    } catch (e) {
+      return [];
+    }
+  }, [noveltyCurve, detectionMethod, detectionParam]);
+
   // Normalize novelty curve for display
   const normalizedCurve = useMemo(() => {
     if (!noveltyCurve.length || !duration) return [];
     const maxVal = Math.max(...noveltyCurve, 1);
     const frameHop = duration / noveltyCurve.length;
-    
+
     return noveltyCurve.map((value, index) => ({
       time: index * frameHop,
       value: value / maxVal, // Normalize to 0-1
@@ -94,46 +110,53 @@ export const NavigationTimeline: React.FC<NavigationTimelineProps> = ({
   }, [noveltyCurve, duration]);
 
   // Handle click on timeline
-  const handleTimelineClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!timelineRef.current || !duration) return;
-    const rect = timelineRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
-    const time = (percent / 100) * duration;
-    
-    onSeek(time);
-    
-    // Find which section was clicked and scroll to it
-    const clickedSection = sectionBlocks.find(
-      (block) => percent >= block.startPercent && percent <= block.startPercent + block.widthPercent
-    );
-    
-    if (clickedSection && onSectionClick) {
-      onSectionClick(clickedSection.section);
-    }
-    
-    // Scroll the main grid to the clicked section
-    if (clickedSection && scrollContainerRef?.current) {
-      const sectionElement = document.querySelector(
-        `[data-section-id="${clickedSection.section.section_id}"]`
+  const handleTimelineClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!timelineRef.current || !duration) return;
+      const rect = timelineRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
+      const time = (percent / 100) * duration;
+
+      onSeek(time);
+
+      // Find which section was clicked and scroll to it
+      const clickedSection = sectionBlocks.find(
+        (block) =>
+          percent >= block.startPercent && percent <= block.startPercent + block.widthPercent,
       );
-      if (sectionElement) {
-        sectionElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
+
+      if (clickedSection && onSectionClick) {
+        onSectionClick(clickedSection.section);
       }
-    }
-  }, [duration, onSeek, sectionBlocks, onSectionClick, scrollContainerRef]);
+
+      // Scroll the main grid to the clicked section
+      if (clickedSection && scrollContainerRef?.current) {
+        const sectionElement = document.querySelector(
+          `[data-section-id="${clickedSection.section.section_id}"]`,
+        );
+        if (sectionElement) {
+          sectionElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
+        }
+      }
+    },
+    [duration, onSeek, sectionBlocks, onSectionClick, scrollContainerRef],
+  );
 
   // Handle drag start
-  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    setIsDragging(true);
-    if (!timelineRef.current || !duration) return;
-    const rect = timelineRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
-    const time = (percent / 100) * duration;
-    setDragPosition(time);
-    onSeek(time);
-  }, [duration, onSeek]);
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      setIsDragging(true);
+      if (!timelineRef.current || !duration) return;
+      const rect = timelineRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
+      const time = (percent / 100) * duration;
+      setDragPosition(time);
+      onSeek(time);
+    },
+    [duration, onSeek],
+  );
 
   // Handle drag move
   useEffect(() => {
@@ -197,6 +220,28 @@ export const NavigationTimeline: React.FC<NavigationTimelineProps> = ({
               strokeWidth="1"
               strokeOpacity="0.4"
             />
+            {/* Significant peak markers */}
+            {significantPeakFrames.length > 0 &&
+              significantPeakFrames.map((p) => {
+                const percent = (p / noveltyCurve.length) * 100;
+                const frame = p;
+                const frameTime = (frame / noveltyCurve.length) * duration;
+                return (
+                  <circle
+                    key={`nav-sig-${p}`}
+                    cx={`${percent}%`}
+                    cy={`${10}%`}
+                    r={2}
+                    fill="#ff7b72"
+                    stroke="#fff"
+                    strokeWidth={0.5}
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      onSeek(frameTime);
+                    }}
+                  />
+                );
+              })}
           </svg>
         )}
 
@@ -227,11 +272,13 @@ export const NavigationTimeline: React.FC<NavigationTimelineProps> = ({
         <div className="absolute bottom-0 left-0 right-0 h-4 text-[10px] text-slate-500 pointer-events-none">
           <div className="absolute left-0 px-1">0:00</div>
           <div className="absolute right-0 px-1">
-            {Math.floor(duration / 60)}:{Math.floor(duration % 60).toString().padStart(2, '0')}
+            {Math.floor(duration / 60)}:
+            {Math.floor(duration % 60)
+              .toString()
+              .padStart(2, '0')}
           </div>
         </div>
       </div>
     </div>
   );
 };
-

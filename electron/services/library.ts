@@ -283,6 +283,31 @@ export async function importSong(userDataPath: string, payload: ImportPayload) {
       metadata,
       status,
     });
+    // After importing the project, try to automatically fetch lyrics and persist to the project
+    try {
+      const lyricsService = require('./lyrics');
+      if (lyricsService && typeof lyricsService.fetchLyrics === 'function') {
+        const duration = (metadata && metadata.duration_seconds) || null;
+        const lyricsRes = await lyricsService.fetchLyrics(
+          artist,
+          title,
+          metadata.album || null,
+          duration,
+        );
+        if (lyricsRes) {
+          try {
+            const dbInstance = require('../db');
+            dbInstance.updateProjectLyrics(id, JSON.stringify(lyricsRes));
+            logger.info('[Library] Persisted fetched lyrics for project id', id);
+          } catch (err) {
+            logger.warn('[Library] Failed to persist lyrics to DB:', err?.message || err);
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn('[Library] Lyrics fetch failed:', err?.message || err);
+      // This is non-fatal; continue
+    }
     return {
       success: true,
       id,

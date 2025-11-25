@@ -48,6 +48,13 @@ export function useSettings() {
       const res = await window.ipc.invoke('DB:SET_SETTING', { key, value });
       if (res && res.success) {
         setSettings((prev) => ({ ...prev, [key]: value }));
+        // Broadcast a settings event so other hook instances can update
+        try {
+          const evt = new CustomEvent('APP:SETTING_UPDATED', { detail: { key, value } });
+          window.dispatchEvent(evt);
+        } catch (e) {
+          // Ignore, not all environments support CustomEvent
+        }
         return { success: true };
       } else {
         return { success: false, error: res?.error || 'Failed to update setting' };
@@ -60,6 +67,15 @@ export function useSettings() {
 
   useEffect(() => {
     loadSettings();
+    // Listen for setting updates from other components and update local state
+    const handleSettingUpdated = (ev: any) => {
+      const { key, value } = ev.detail || {};
+      if (key) setSettings((prev) => ({ ...prev, [key]: value }));
+    };
+    window.addEventListener('APP:SETTING_UPDATED', handleSettingUpdated);
+    return () => {
+      window.removeEventListener('APP:SETTING_UPDATED', handleSettingUpdated);
+    };
   }, [loadSettings]);
 
   return {

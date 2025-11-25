@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate, useLocation, Routes, Route } from 'react-router-dom';
+import { useNavigate, Routes, Route } from 'react-router-dom';
 import MainShell from './components/layout/MainShell.tsx';
 import ArchitectNew from './pages/Architect';
 import Connections from './pages/Connections';
@@ -12,12 +12,12 @@ import AnalysisTuner from './components/tools/AnalysisTuner';
 // BlocksProvider is provided at the app root in `main.jsx` to avoid re-mounts during HMR
 import { useEditor } from './contexts/EditorContext';
 import logger from './lib/logger';
+import { persistSandboxContext, readPersistedSandboxContext } from '@/utils/sandboxState';
 
 function App() {
   const navigate = useNavigate();
-  const location = useLocation();
 
-  const [sandboxContext, setSandboxContext] = React.useState(null);
+  const [sandboxContext, setSandboxContext] = React.useState(() => readPersistedSandboxContext());
   const editor = useEditor();
   const [showAnalysisTuner, setShowAnalysisTuner] = React.useState(false);
 
@@ -97,15 +97,6 @@ function App() {
       // Set context and update editor
       if (analysisData) {
         setSandboxContext(analysisData);
-        if (editor?.actions?.updateSongData) {
-          logger.debug('[App] Updating EditorContext with analysis data');
-          editor.actions.updateSongData(analysisData);
-        }
-        // Store fileHash globally for other components
-        if (analysisData.fileHash || analysisData.file_hash) {
-          globalThis.__lastAnalysisHash = analysisData.fileHash || analysisData.file_hash;
-          globalThis.__currentFileHash = analysisData.fileHash || analysisData.file_hash;
-        }
       } else {
         logger.warn('[App] No analysis data available for sandbox');
         setSandboxContext(detail || null);
@@ -115,7 +106,35 @@ function App() {
     };
     globalThis.addEventListener('OPEN_SANDBOX', onOpenSandbox);
     return () => globalThis.removeEventListener('OPEN_SANDBOX', onOpenSandbox);
-  }, [navigate, editor?.actions?.updateSongData]);
+  }, [navigate]);
+
+  React.useEffect(() => {
+    if (!sandboxContext) {
+      persistSandboxContext(null);
+      return;
+    }
+
+    const hasAnalysisData = Boolean(
+      sandboxContext.linear_analysis || sandboxContext.fileHash || sandboxContext.file_hash,
+    );
+
+    if (!hasAnalysisData) {
+      return;
+    }
+
+    persistSandboxContext(sandboxContext);
+
+    if (editor?.actions?.updateSongData) {
+      logger.debug('[App] Syncing sandbox context into EditorContext');
+      editor.actions.updateSongData(sandboxContext);
+    }
+
+    const hash = sandboxContext.fileHash || sandboxContext.file_hash;
+    if (hash) {
+      globalThis.__lastAnalysisHash = hash;
+      globalThis.__currentFileHash = hash;
+    }
+  }, [sandboxContext, editor?.actions?.updateSongData]);
 
   const handleTunerUpdate = React.useCallback(async () => {
     const hash = globalThis.__lastAnalysisHash || globalThis.__currentFileHash;

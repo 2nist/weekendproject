@@ -4,6 +4,12 @@ import BatchImportPanel from '@/components/library/BatchImportPanel';
 import ReferenceDatasetBrowser from '@/components/library/ReferenceDatasetBrowser';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.jsx';
 import logger from '@/lib/logger';
+import showOpenDialog from '@/lib/filePicker';
+import {
+  readPersistedSandboxContext,
+  subscribeToSandboxContext,
+  SandboxSnapshot,
+} from '@/utils/sandboxState';
 
 export default function LibraryView() {
   const [projects, setProjects] = useState([]);
@@ -12,6 +18,36 @@ export default function LibraryView() {
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [importing, setImporting] = useState(false);
   const [activeTab, setActiveTab] = useState('projects');
+  const [resumeContext, setResumeContext] = useState<SandboxSnapshot | null>(() =>
+    readPersistedSandboxContext(),
+  );
+
+  useEffect(() => {
+    const unsubscribe = subscribeToSandboxContext((snapshot) => {
+      setResumeContext(snapshot);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const resumeButtonLabel = React.useMemo(() => {
+    if (!resumeContext) return null;
+    const title = resumeContext.metadata?.title || 'Last Analysis';
+    const formatted = title.length > 28 ? `${title.slice(0, 25)}...` : title;
+    return `Resume ${formatted}`;
+  }, [resumeContext]);
+
+  const handleResumeSandbox = useCallback(() => {
+    const hash = resumeContext?.fileHash || resumeContext?.file_hash;
+    if (!hash) return;
+    window.dispatchEvent(
+      new CustomEvent('OPEN_SANDBOX', {
+        detail: {
+          fileHash: hash,
+          analysisId: resumeContext?.id || undefined,
+        },
+      }),
+    );
+  }, [resumeContext]);
 
   const loadProjects = useCallback(async () => {
     setLoading(true);
@@ -85,11 +121,11 @@ export default function LibraryView() {
 
   const handleAttachMidi = async (projectId) => {
     try {
-      const dialogRes = await window.electronAPI.showOpenDialog({
+      const dialogRes = await showOpenDialog({
         title: 'Select MIDI File',
         filters: [{ name: 'MIDI Files', extensions: ['mid', 'midi'] }],
       });
-      if (dialogRes.canceled) return;
+      if (!dialogRes || dialogRes.canceled) return;
       const filePath = (dialogRes.filePaths || [])[0];
       if (!filePath) return;
       const res = await window.ipc.invoke('LIBRARY:ATTACH_MIDI', {
@@ -136,9 +172,17 @@ export default function LibraryView() {
 
   return (
     <div className="p-4 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h2 className="text-xl font-semibold text-foreground">Library</h2>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
+          {resumeContext && resumeButtonLabel && (
+            <button
+              onClick={handleResumeSandbox}
+              className="px-4 py-2 bg-accent text-accent-foreground rounded hover:bg-accent/90 text-sm"
+            >
+              {resumeButtonLabel}
+            </button>
+          )}
           <button
             onClick={handleRefresh}
             className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 text-sm"

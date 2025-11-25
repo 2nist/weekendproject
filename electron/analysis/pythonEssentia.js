@@ -178,24 +178,37 @@ async function analyzeAudioWithPython(filePath, progressCallback = () => {}) {
       outputBuffer += data.toString();
       let newlineIndex;
       while ((newlineIndex = outputBuffer.indexOf('\n')) !== -1) {
-        const line = outputBuffer.slice(0, newlineIndex).trim();
+        const rawLine = outputBuffer.slice(0, newlineIndex);
         outputBuffer = outputBuffer.slice(newlineIndex + 1);
+        const line = rawLine.trim();
         if (!line) continue;
+
+        let parsedMsg = null;
         try {
-          const msg = JSON.parse(line);
-          if (msg.status === 'progress') {
-            try {
-              progressCallback(msg.value);
-              // Log stage information if available
-              if (msg.stage) {
-                logger.debug(`[PythonBridge] Stage: ${msg.stage} (${msg.value}%)`);
-              }
-            } catch (e) {
-              logger.warn('Progress callback error:', e.message);
+          parsedMsg = JSON.parse(line);
+          logger.pass1('[PYTHON]', parsedMsg);
+        } catch (err) {
+          parsedMsg = null;
+          logger.debug('[PYTHON]', line);
+        }
+
+        if (!parsedMsg) {
+          continue;
+        }
+
+        const msg = parsedMsg;
+        if (msg.status === 'progress') {
+          try {
+            progressCallback(msg.value);
+            if (msg.stage) {
+              logger.debug(`[PythonBridge] Stage: ${msg.stage} (${msg.value}%)`);
             }
-            continue;
+          } catch (e) {
+            logger.warn('Progress callback error:', e.message);
           }
-          if (msg.status === 'complete' && msg.path) {
+          continue;
+        }
+        if (msg.status === 'complete' && msg.path) {
             // file handoff
             try {
               const raw = fs.readFileSync(msg.path, 'utf8');
@@ -219,24 +232,24 @@ async function analyzeAudioWithPython(filePath, progressCallback = () => {}) {
               return reject(new Error(`Failed to read result file: ${err.message}`));
             }
           }
-          if (msg.error) {
-            resultHandled = true;
-            cleanup(); // ✅ Cleanup on error
-            return reject(new Error(msg.error));
-          }
-        } catch (err) {
-          // ignore partial/non-JSON lines
-          logger.debug('pythonEssentia: non-json stdout line', err?.message || err);
+        if (msg.error) {
+          resultHandled = true;
+          cleanup(); // ✅ Cleanup on error
+          return reject(new Error(msg.error));
         }
       }
     });
 
     pythonProcess.stderr.on('data', (data) => {
-      const msg = data.toString();
-      if (!msg.includes('UserWarning') && !msg.includes('FutureWarning')) {
-        logger.error(`[Python stderr]: ${msg}`);
-        errorString += msg;
-      }
+      const chunk = data.toString();
+      chunk.split(/\r?\n/).forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        logger.error('[PYTHON]', trimmed);
+        if (!trimmed.includes('UserWarning') && !trimmed.includes('FutureWarning')) {
+          errorString += `${trimmed}\n`;
+        }
+      });
     });
 
     pythonProcess.on('close', (code) => {

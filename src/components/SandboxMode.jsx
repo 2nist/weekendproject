@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import ArrangementBlock from './ArrangementBlock';
 import SectionSculptor from './SectionSculptor';
+import { MusicTheoryToolkit } from './sandbox/MusicTheoryToolkit';
+import { LyricDraftPanel } from './lyrics/LyricDraftPanel';
+import { draftTextToLyricLines } from '@/utils/lyrics';
 
 /**
  * Blank Sandbox Mode - Generative Composition
@@ -27,6 +30,7 @@ export default function SandboxMode({
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedBlock, setSelectedBlock] = useState(null);
   const [progressionInput, setProgressionInput] = useState('');
+  const [lyricDraft, setLyricDraft] = useState('');
 
   // Keep selected block in sync with latest generated data
   useEffect(() => {
@@ -115,8 +119,31 @@ export default function SandboxMode({
   useEffect(() => {
     if (selectedBlock) {
       setProgressionInput(blockProgressionToString(selectedBlock));
+      setLyricDraft(extractLyricText(selectedBlock));
+    } else {
+      setLyricDraft('');
     }
   }, [selectedBlock]);
+
+  const appendSuggestedProgression = (romans) => {
+    if (!selectedBlock) return;
+    const addition = romans.join(', ');
+    const nextValue = progressionInput?.trim()
+      ? `${progressionInput.trim()}, ${addition}`
+      : addition;
+    handleProgressionChange(nextValue);
+  };
+
+  const handleLyricChange = (value) => {
+    setLyricDraft(value);
+    if (!selectedBlock) return;
+
+    const lines = draftTextToLyricLines(value);
+    handleBlockUpdate(selectedBlock.id, {
+      lyric_text: value,
+      lyrics: lines,
+    });
+  };
 
   return (
     <div className="flex gap-4 p-4 h-screen">
@@ -280,6 +307,11 @@ export default function SandboxMode({
             {isGenerating ? 'Generating...' : 'Generate Structure'}
           </button>
         </div>
+        <MusicTheoryToolkit
+          keyCenter={constraints.key}
+          mode={constraints.mode}
+          onAppendProgression={appendSuggestedProgression}
+        />
       </aside>
 
       {/* Center: Generated Structure */}
@@ -400,6 +432,12 @@ export default function SandboxMode({
             </div>
           </div>
 
+          <LyricDraftPanel
+            label={`Lyric Sketch · ${selectedBlock.label || selectedBlock.section_label || 'Section'}`}
+            text={lyricDraft}
+            onChange={handleLyricChange}
+          />
+
           <SectionSculptor
             section={selectedBlock}
             fileHash={globalThis.__lastAnalysisHash || globalThis.__currentFileHash || null}
@@ -419,4 +457,14 @@ function blockProgressionToString(block) {
   return chords
     .map((entry) => entry.functional_analysis?.roman_numeral || entry.chord?.root || 'I')
     .join(', ');
+}
+
+function extractLyricText(block) {
+  if (!block) return '';
+  if (typeof block.lyric_text === 'string') {
+    return block.lyric_text;
+  }
+  const existing = block.lyrics || [];
+  if (!existing.length) return '';
+  return existing.map((line) => line.text).join('\n');
 }

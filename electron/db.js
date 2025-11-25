@@ -150,10 +150,34 @@ async function init(app) {
       midi_path TEXT,
       analysis_id INTEGER,
       status TEXT,
+      lyrics_json TEXT,
       metadata_json TEXT,
       created_at TEXT
     );
   `);
+
+  // Ensure schema upgrades for existing DBs: add 'lyrics_json' column if missing
+  try {
+    const pragma = db.prepare("PRAGMA table_info('Projects')");
+    let hasLyrics = false;
+    while (pragma.step()) {
+      const row = pragma.getAsObject();
+      if (row && (row.name === 'lyrics_json' || row.name === 'lyrics')) {
+        hasLyrics = true;
+        break;
+      }
+    }
+    pragma.free();
+    if (!hasLyrics) {
+      db.run('ALTER TABLE Projects ADD COLUMN lyrics_json TEXT');
+      logger.info('DB: Added missing column lyrics_json to Projects');
+    }
+  } catch (e) {
+    logger.warn(
+      'DB: Failed to verify/alter Projects table for lyrics_json column:',
+      e?.message || e,
+    );
+  }
 }
 
 function populateInitialData() {
@@ -650,8 +674,8 @@ function saveProject(projectData) {
     projectData;
 
   db.run(
-    `INSERT INTO Projects (uuid, title, artist, bpm, key_signature, audio_path, midi_path, analysis_id, status, metadata_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO Projects (uuid, title, artist, bpm, key_signature, audio_path, midi_path, analysis_id, status, lyrics_json, metadata_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       uuid,
       title || '',
@@ -662,6 +686,7 @@ function saveProject(projectData) {
       midi_path || null,
       projectData.analysis_id || null,
       status || 'pending',
+      projectData.lyrics_json || null,
       JSON.stringify(metadata || {}),
       new Date().toISOString(),
     ],
@@ -701,6 +726,7 @@ function getAllProjects() {
       analysis_id: row.analysis_id,
       status: row.status,
       metadata: JSON.parse(row.metadata_json || '{}'),
+      lyrics: row.lyrics_json ? JSON.parse(row.lyrics_json) : null,
       created_at: row.created_at,
     });
   }
@@ -730,6 +756,7 @@ function getProjectById(projectId) {
     status: row.status,
     metadata: JSON.parse(row.metadata_json || '{}'),
     created_at: row.created_at,
+    lyrics: row.lyrics_json ? JSON.parse(row.lyrics_json) : null,
   };
 }
 
@@ -802,6 +829,24 @@ function updateProjectAnalysisId(projectId, analysisId) {
   }
 }
 
+function updateProjectLyrics(projectId, lyricsJson) {
+  try {
+    logger.debug(
+      'DB: updateProjectLyrics called for id:',
+      projectId,
+      'json length:',
+      (lyricsJson || '').length,
+    );
+    db.run('UPDATE Projects SET lyrics_json = ? WHERE id = ?', [lyricsJson, projectId]);
+    const data = db.export();
+    fs.writeFileSync(dbPath, Buffer.from(data));
+    return true;
+  } catch (error) {
+    logger.error('DB: Error updating project lyrics:', error);
+    return false;
+  }
+}
+
 function attachMidiToProject(projectId, midiPath) {
   db.run('UPDATE Projects SET midi_path = ? WHERE id = ?', [midiPath, projectId]);
   const data = db.export();
@@ -827,6 +872,7 @@ module.exports = {
   getProjectById,
   deleteAnalysisById,
   updateProjectAnalysisId,
+  updateProjectLyrics,
   updateAnalysisById,
   getAnalysisById,
   // New pagination and optimization functions

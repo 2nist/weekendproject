@@ -645,7 +645,11 @@ async function optimizeWithCoordinateDescentWithSongs(
   sendProgress: (data: any) => void,
   logCallback?: (message: string) => void,
 ): Promise<EngineConfig> {
-  const log = logCallback || logger.debug || console.log;
+  const log =
+    logCallback ||
+    ((...args: any[]) => {
+      logger.debug(...args);
+    });
   let currentConfig = { ...baseline };
   let currentScore = 0;
 
@@ -866,7 +870,11 @@ export async function runCalibration(
   selectedIds?: string[],
 ): Promise<{ success: boolean; bestConfig?: EngineConfig; score?: number; error?: string }> {
   try {
-    const log = logCallback || logger.debug || console.log;
+    const log =
+      logCallback ||
+      ((...args: any[]) => {
+        logger.debug(...args);
+      });
 
     log('[CALIBRATION] Starting calibration optimization...');
 

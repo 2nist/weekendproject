@@ -12,6 +12,24 @@ import logger from './lib/logger';
 
 // Load and apply saved theme on app startup (after DOM is ready)
 if (typeof window !== 'undefined') {
+  // Provide a safe shim for `window.electronAPI` and `window.ipc` when running
+  // in a browser (Vite dev) so calls like `window.electronAPI.invoke(...)`
+  // don't throw `Cannot read properties of undefined`.
+  if (!window.electronAPI) {
+    window.electronAPI = {
+      invoke: () => Promise.reject(new Error('Electron IPC not available')),
+      send: () => {},
+      on: () => () => {},
+      showOpenDialog: undefined,
+    };
+  }
+  if (!window.ipc) {
+    window.ipc = {
+      invoke: window.electronAPI.invoke,
+      send: window.electronAPI.send,
+      on: window.electronAPI.on,
+    };
+  }
   // Wait for DOM to be ready
   const applyThemeOnStartup = async () => {
     // Try to load from database first (async), then fallback to localStorage

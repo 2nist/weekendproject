@@ -89,6 +89,59 @@ export default function useAppIPC() {
     return invoke('DB:LOAD_ARRANGEMENT');
   }, []);
 
+  useEffect(() => {
+    if (!window?.ipc?.on) return undefined;
+
+    const logWithStyle = (level = 'INFO', entries = []) => {
+      const args = Array.isArray(entries) ? entries : [entries];
+      const levelUpper = String(level).toUpperCase();
+      const hasPythonTag = args.some(
+        (entry) =>
+          typeof entry === 'string' &&
+          entry.toUpperCase().includes('PYTHON'),
+      );
+
+      let label = hasPythonTag ? '[PYTHON]' : '[BACKEND]';
+      let style = hasPythonTag
+        ? 'color: #ffff55; font-weight: bold'
+        : 'color: #00ff00; font-weight: bold';
+      let consoleMethod = console.log;
+
+      if (levelUpper.includes('ERROR')) {
+        label = hasPythonTag ? '[PYTHON ERROR]' : '[BACKEND ERROR]';
+        style = 'color: #ff5555; font-weight: bold';
+        consoleMethod = console.error;
+      }
+
+      try {
+        consoleMethod?.(`%c${label}`, style, ...args);
+      } catch (err) {
+        // Fallback to default logging if styling fails
+        consoleMethod?.(label, ...args);
+      }
+    };
+
+    const unsubscribeMain = window.ipc.on('MAIN:LOG', (payload) => {
+      if (!payload) return;
+      const { level = 'INFO', args = [] } = payload;
+      logWithStyle(level, args);
+    });
+
+    const unsubscribeDebug = window.ipc.on('DEBUG:LOG', (message) => {
+      const args = Array.isArray(message) ? message : [message];
+      logWithStyle('INFO', args);
+    });
+
+    return () => {
+      try {
+        unsubscribeMain && unsubscribeMain();
+      } catch (err) {}
+      try {
+        unsubscribeDebug && unsubscribeDebug();
+      } catch (err) {}
+    };
+  }, []);
+
   return {
     blocks,
     setBlocks,

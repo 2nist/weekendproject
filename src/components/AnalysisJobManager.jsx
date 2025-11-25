@@ -12,6 +12,9 @@ import {
   ProgressBar,
   StatusIndicator,
 } from '../utils/errorHandling';
+import showOpenDialog from '@/lib/filePicker';
+
+const AUTO_OPEN_SANDBOX_KEY = 'progression:autoOpenSandbox';
 
 /**
  * Analysis Job Manager
@@ -30,20 +33,19 @@ export default function AnalysisJobManager() {
   const [fileHash, setFileHash] = useState(null);
   const [analysisResult, setAnalysisResult] = useState(null);
   const progressUnsubscribeRef = useRef(null);
+  const lastAutoOpenHashRef = useRef(null);
+  const [autoOpenSandbox, setAutoOpenSandbox] = useState(() => {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return true;
+    }
+    const stored = window.localStorage.getItem(AUTO_OPEN_SANDBOX_KEY);
+    return stored === null ? true : stored === 'true';
+  });
 
   // Async operation for file selection
   const fileSelectOperation = useAsyncOperation(
     async () => {
-      if (!window.electronAPI || !window.electronAPI.showOpenDialog) {
-        throw new AppError(
-          'File selection is not available',
-          'ELECTRON_API_MISSING',
-          'File selection is not available. Please ensure you are running in Electron.',
-          false,
-        );
-      }
-
-      const result = await window.electronAPI.showOpenDialog({
+      const result = await showOpenDialog({
         title: 'Select Audio File',
         filters: [
           {
@@ -54,6 +56,17 @@ export default function AnalysisJobManager() {
         ],
         properties: ['openFile'],
       });
+
+      // If we didn't get a result, treat it as a cancelled/unavailable selection
+      // and surface a recoverable USER_CANCELLED error rather than a hard failure.
+      if (!result) {
+        throw new AppError(
+          'No file selected',
+          'USER_CANCELLED',
+          'File selection was cancelled or is unavailable in this environment.',
+          true,
+        );
+      }
 
       if (result && !result.canceled && result.filePaths && result.filePaths.length > 0) {
         return result.filePaths[0];
@@ -188,6 +201,28 @@ export default function AnalysisJobManager() {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      window.localStorage.setItem(AUTO_OPEN_SANDBOX_KEY, String(autoOpenSandbox));
+    } catch (err) {
+      console.warn('[AnalysisJobManager] Failed to persist auto-open preference:', err);
+    }
+  }, [autoOpenSandbox]);
+
+  useEffect(() => {
+    if (!autoOpenSandbox || analysisStatus !== 'completed' || !fileHash) return;
+    if (lastAutoOpenHashRef.current === fileHash) return;
+    lastAutoOpenHashRef.current = fileHash;
+    window.dispatchEvent(
+      new CustomEvent('OPEN_SANDBOX', {
+        detail: {
+          fileHash,
+        },
+      }),
+    );
+  }, [autoOpenSandbox, analysisStatus, fileHash]);
+
   // Listen for analysis progress updates
   useEffect(() => {
     if (!window.ipc || !window.ipc.on) return;
@@ -246,6 +281,7 @@ export default function AnalysisJobManager() {
       return;
     }
 
+    lastAutoOpenHashRef.current = null;
     analysisOperation.execute(filePath);
   }, [filePath, analysisOperation]);
 
@@ -322,6 +358,16 @@ export default function AnalysisJobManager() {
           'Start Analysis'
         )}
       </button>
+
+      <label className="flex items-center gap-2 mt-4 text-sm text-muted-foreground">
+        <input
+          type="checkbox"
+          className="accent-primary"
+          checked={autoOpenSandbox}
+          onChange={(event) => setAutoOpenSandbox(event.target.checked)}
+        />
+        Auto-open Sandbox when analysis completes
+      </label>
 
       {analysisStatus && (
         <div className="mt-5 p-4 bg-card border border-border rounded-md">

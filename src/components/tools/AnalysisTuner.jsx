@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { useSettings } from '@/hooks/useSettings';
 import PropTypes from 'prop-types';
 import Button from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -16,20 +17,22 @@ const DEFAULTS = {
   detailLevel: 0.5, // 0..1 -> phrase vs movement emphasis
   adaptiveSensitivity: 1.5, // MAD multiplier for peaks
   mfccWeight: 0.5, // timbre separation weight
+  noveltyMethod: 'mad', // 'mad' or 'percentile'
+  noveltyParam: 1.5, // MAD multiplier or percentile value
 };
 
 export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
   // Local settings state - updates instantly on slider move
   const [localSettings, setLocalSettings] = useState(DEFAULTS);
   const [selectedKey, setSelectedKey] = useState('');
-  
+
   // Load saved settings from database on mount
   useEffect(() => {
     const loadSettings = async () => {
       try {
         const ipcAPI = globalThis?.electronAPI?.invoke || globalThis?.ipc?.invoke;
         if (!ipcAPI) return;
-        
+
         const settings = await ipcAPI('DB:GET_SETTINGS');
         if (settings) {
           const loadedSettings = {
@@ -39,11 +42,14 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
             temperature: parseFloat(settings.analysis_temperature) || DEFAULTS.temperature,
             noveltyKernel: parseInt(settings.analysis_noveltyKernel) || DEFAULTS.noveltyKernel,
             detailLevel: parseFloat(settings.analysis_detailLevel) || DEFAULTS.detailLevel,
-            adaptiveSensitivity: parseFloat(settings.analysis_adaptiveSensitivity) || DEFAULTS.adaptiveSensitivity,
+            adaptiveSensitivity:
+              parseFloat(settings.analysis_adaptiveSensitivity) || DEFAULTS.adaptiveSensitivity,
             mfccWeight: parseFloat(settings.analysis_mfccWeight) || DEFAULTS.mfccWeight,
+            noveltyMethod: settings.analysis_noveltyMethod || DEFAULTS.noveltyMethod,
+            noveltyParam: parseFloat(settings.analysis_noveltyParam) || DEFAULTS.noveltyParam,
           };
           setLocalSettings(loadedSettings);
-          
+
           if (settings.analysis_globalKey) {
             setSelectedKey(settings.analysis_globalKey);
           }
@@ -52,20 +58,27 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
         console.warn('[AnalysisTuner] Failed to load settings:', err);
       }
     };
-    
+
     loadSettings();
   }, []);
-  
+
   // Loading states
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [loadingCommit, setLoadingCommit] = useState(false);
   const [previewSuccess, setPreviewSuccess] = useState(false);
   const [commitSuccess, setCommitSuccess] = useState(false);
+  const { settings: persistedSettings, updateSetting } = useSettings();
 
   // Handle slider change - visual only, fast update
   const handleSliderChange = useCallback((key, value) => {
     setLocalSettings((prev) => ({ ...prev, [key]: value }));
     // Clear success indicators when settings change
+    setPreviewSuccess(false);
+    setCommitSuccess(false);
+  }, []);
+
+  const handleSettingChange = useCallback((key, value) => {
+    setLocalSettings((prev) => ({ ...prev, [key]: value }));
     setPreviewSuccess(false);
     setCommitSuccess(false);
   }, []);
@@ -79,7 +92,7 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
 
     setLoadingPreview(true);
     setPreviewSuccess(false);
-    
+
     try {
       console.log('[AnalysisTuner] Preview - Calling ANALYSIS:RESEGMENT with:', {
         fileHash,
@@ -87,8 +100,11 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
         commit: false,
       });
 
-      const ipcAPI = globalThis?.electronAPI?.invoke || globalThis?.electron?.resegment || globalThis?.ipc?.invoke;
-      
+      const ipcAPI =
+        globalThis?.electronAPI?.invoke ||
+        globalThis?.electron?.resegment ||
+        globalThis?.ipc?.invoke;
+
       if (!ipcAPI) {
         throw new Error('IPC API not available');
       }
@@ -129,7 +145,7 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
 
     setLoadingCommit(true);
     setCommitSuccess(false);
-    
+
     try {
       console.log('[AnalysisTuner] Commit - Calling ANALYSIS:RESEGMENT with:', {
         fileHash,
@@ -137,8 +153,11 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
         commit: true,
       });
 
-      const ipcAPI = globalThis?.electronAPI?.invoke || globalThis?.electron?.resegment || globalThis?.ipc?.invoke;
-      
+      const ipcAPI =
+        globalThis?.electronAPI?.invoke ||
+        globalThis?.electron?.resegment ||
+        globalThis?.ipc?.invoke;
+
       if (!ipcAPI) {
         throw new Error('IPC API not available');
       }
@@ -175,12 +194,12 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
     // Try to get fileHash from multiple sources if not provided as prop
     let currentFileHash = fileHash;
     if (!currentFileHash) {
-      currentFileHash = 
-        globalThis.__lastAnalysisHash || 
+      currentFileHash =
+        globalThis.__lastAnalysisHash ||
         globalThis.__currentFileHash ||
         globalThis.__lastAnalysisData?.fileHash;
     }
-    
+
     if (!currentFileHash) {
       const errorMsg = 'No analysis file hash available. Please run an analysis first.';
       console.error('[AnalysisTuner]', errorMsg);
@@ -190,10 +209,10 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
 
     setLoadingPreview(true);
     setPreviewSuccess(false);
-    
+
     try {
       const ipcAPI = globalThis?.electron?.recalcChords || globalThis?.electronAPI?.invoke;
-      
+
       if (!ipcAPI) {
         throw new Error('IPC API not available');
       }
@@ -227,12 +246,12 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
     // Try to get fileHash from multiple sources if not provided as prop
     let currentFileHash = fileHash;
     if (!currentFileHash) {
-      currentFileHash = 
-        globalThis.__lastAnalysisHash || 
+      currentFileHash =
+        globalThis.__lastAnalysisHash ||
         globalThis.__currentFileHash ||
         globalThis.__lastAnalysisData?.fileHash;
     }
-    
+
     if (!currentFileHash) {
       const errorMsg = 'No analysis file hash available. Please run an analysis first.';
       console.error('[AnalysisTuner]', errorMsg);
@@ -242,10 +261,10 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
 
     setLoadingCommit(true);
     setCommitSuccess(false);
-    
+
     try {
       const ipcAPI = globalThis?.electron?.recalcChords || globalThis?.electronAPI?.invoke;
-      
+
       if (!ipcAPI) {
         throw new Error('IPC API not available');
       }
@@ -275,9 +294,12 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
   }, [fileHash, localSettings, selectedKey, onUpdate]);
 
   // Handle structure slider change (updates local state only)
-  const handleStructureSliderChange = useCallback((key, value) => {
-    handleSliderChange(key, value);
-  }, [handleSliderChange]);
+  const handleStructureSliderChange = useCallback(
+    (key, value) => {
+      handleSliderChange(key, value);
+    },
+    [handleSliderChange],
+  );
 
   // Handle Preview Structure (V2)
   const handlePreviewStructure = useCallback(async () => {
@@ -288,11 +310,14 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
 
     setLoadingPreview(true);
     setPreviewSuccess(false);
-    
+
     try {
       const scaleWeights = computeScaleWeights(localSettings.detailLevel);
-      const ipcAPI = globalThis?.electronAPI?.invoke || globalThis?.electron?.resegment || globalThis?.ipc?.invoke;
-      
+      const ipcAPI =
+        globalThis?.electronAPI?.invoke ||
+        globalThis?.electron?.resegment ||
+        globalThis?.ipc?.invoke;
+
       if (!ipcAPI) {
         throw new Error('IPC API not available');
       }
@@ -303,6 +328,8 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
           version: 'v2',
           adaptiveSensitivity: localSettings.adaptiveSensitivity,
           mfccWeight: localSettings.mfccWeight,
+          noveltyMethod: localSettings.noveltyMethod,
+          noveltyParam: localSettings.noveltyParam,
           scaleWeights,
           forceOverSeg: false,
         },
@@ -333,11 +360,14 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
 
     setLoadingCommit(true);
     setCommitSuccess(false);
-    
+
     try {
       const scaleWeights = computeScaleWeights(localSettings.detailLevel);
-      const ipcAPI = globalThis?.electronAPI?.invoke || globalThis?.electron?.resegment || globalThis?.ipc?.invoke;
-      
+      const ipcAPI =
+        globalThis?.electronAPI?.invoke ||
+        globalThis?.electron?.resegment ||
+        globalThis?.ipc?.invoke;
+
       if (!ipcAPI) {
         throw new Error('IPC API not available');
       }
@@ -348,6 +378,8 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
           version: 'v2',
           adaptiveSensitivity: localSettings.adaptiveSensitivity,
           mfccWeight: localSettings.mfccWeight,
+          noveltyMethod: localSettings.noveltyMethod,
+          noveltyParam: localSettings.noveltyParam,
           scaleWeights,
           forceOverSeg: false,
         },
@@ -369,18 +401,42 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
     }
   }, [fileHash, localSettings, onUpdate]);
 
-  // Transform grid operations
-  const transformGrid = useCallback(async (operation, value = 0, commit = false) => {
+  const [savingSettings, setSavingSettings] = useState(false);
+  const handleSaveSettings = useCallback(async () => {
+    setSavingSettings(true);
     try {
-      const ipcAPI = globalThis?.electron?.transformGrid || globalThis?.electronAPI?.invoke;
-      if (ipcAPI) {
-        await ipcAPI('ANALYSIS:TRANSFORM_GRID', { fileHash, operation, value, commit });
-        onUpdate();
-      }
+      await updateSetting('analysis_noveltyMethod', localSettings.noveltyMethod);
+      await updateSetting('analysis_noveltyParam', String(localSettings.noveltyParam));
+      await updateSetting(
+        'analysis_adaptiveSensitivity',
+        String(localSettings.adaptiveSensitivity),
+      );
+      // Optionally persist other structure fields here
+      setCommitSuccess(true);
+      setTimeout(() => setCommitSuccess(false), 2000);
     } catch (err) {
-      console.error('[AnalysisTuner] transformGrid failed:', err);
+      console.error('[AnalysisTuner] Failed to save settings:', err);
+      alert('Failed to save settings');
+    } finally {
+      setSavingSettings(false);
     }
-  }, [fileHash, onUpdate]);
+  }, [localSettings, updateSetting]);
+
+  // Transform grid operations
+  const transformGrid = useCallback(
+    async (operation, value = 0, commit = false) => {
+      try {
+        const ipcAPI = globalThis?.electron?.transformGrid || globalThis?.electronAPI?.invoke;
+        if (ipcAPI) {
+          await ipcAPI('ANALYSIS:TRANSFORM_GRID', { fileHash, operation, value, commit });
+          onUpdate();
+        }
+      } catch (err) {
+        console.error('[AnalysisTuner] transformGrid failed:', err);
+      }
+    },
+    [fileHash, onUpdate],
+  );
 
   return (
     <div className="p-2 rounded bg-slate-900 text-slate-200 border border-slate-800 w-full">
@@ -395,7 +451,9 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
 
         <TabsContent value="harmony" className="p-3 space-y-3">
           <div className="space-y-2">
-            <label className="text-xs" htmlFor="tuner-key-select">Key</label>
+            <label className="text-xs" htmlFor="tuner-key-select">
+              Key
+            </label>
             <KeySelector value={selectedKey} onChange={(k) => setSelectedKey(k)} />
           </div>
           <Control
@@ -492,6 +550,37 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
             desc="Higher = Groove / Timbre changes drive splits"
             onChange={(v) => handleStructureSliderChange('mfccWeight', v)}
           />
+          <div className="space-y-2">
+            <div className="flex justify-between text-xs">
+              <span className="font-medium">Significance Method</span>
+              <span className="text-slate-400 font-mono">{localSettings.noveltyMethod}</span>
+            </div>
+            <select
+              value={localSettings.noveltyMethod}
+              onChange={(e) => handleSettingChange('noveltyMethod', e.target.value)}
+              className="w-full px-3 py-2 rounded-md bg-slate-800 border border-slate-700 text-white"
+            >
+              <option value="mad">MAD (median absolute deviation)</option>
+              <option value="percentile">Percentile</option>
+            </select>
+            <div className="flex gap-2 items-center">
+              <div className="flex-1">
+                <Control
+                  label={localSettings.noveltyMethod === 'mad' ? 'MAD Multiplier' : 'Percentile'}
+                  value={localSettings.noveltyParam}
+                  min={localSettings.noveltyMethod === 'mad' ? 0.5 : 50}
+                  max={localSettings.noveltyMethod === 'mad' ? 5 : 99}
+                  step={localSettings.noveltyMethod === 'mad' ? 0.1 : 1}
+                  desc={
+                    localSettings.noveltyMethod === 'mad'
+                      ? 'Larger = stricter (fewer peaks)'
+                      : 'Percentile cutoff for significance (e.g. 80)'
+                  }
+                  onChange={(v) => handleSettingChange('noveltyParam', v)}
+                />
+              </div>
+            </div>
+          </div>
           <div className="space-y-2 pt-2">
             <div className="flex gap-2">
               <Button
@@ -534,24 +623,47 @@ export default function AnalysisTuner({ fileHash, onUpdate = () => {} }) {
                 )}
               </Button>
             </div>
-            <div className="text-[10px] text-slate-400">Uses Architect V2 multi-scale novelty + adaptive peaks</div>
+            <div className="text-[10px] text-slate-400">
+              Uses Architect V2 multi-scale novelty + adaptive peaks
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Button onClick={handleSaveSettings} className="flex-1" disabled={savingSettings}>
+                {savingSettings ? 'Saving...' : 'Save Tuner Defaults'}
+              </Button>
+            </div>
           </div>
         </TabsContent>
 
         <TabsContent value="rhythm" className="p-3 space-y-3">
           <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" onClick={() => transformGrid('half_time', 0, false)}>½ Half Time</Button>
-            <Button variant="outline" onClick={() => transformGrid('double_time', 0, false)}>2x Double Time</Button>
+            <Button variant="outline" onClick={() => transformGrid('half_time', 0, false)}>
+              ½ Half Time
+            </Button>
+            <Button variant="outline" onClick={() => transformGrid('double_time', 0, false)}>
+              2x Double Time
+            </Button>
           </div>
           <div className="pt-2">
-            <label className="text-xs font-bold text-slate-400" htmlFor="grid-offset">Grid Offset (ms)</label>
+            <label className="text-xs font-bold text-slate-400" htmlFor="grid-offset">
+              Grid Offset (ms)
+            </label>
             <div className="flex gap-2">
-              <Button size="sm" variant="ghost" onClick={() => transformGrid('shift', -0.01, false)}>-10ms</Button>
-              <Button size="sm" variant="ghost" onClick={() => transformGrid('shift', 0.01, false)}>+10ms</Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => transformGrid('shift', -0.01, false)}
+              >
+                -10ms
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => transformGrid('shift', 0.01, false)}>
+                +10ms
+              </Button>
             </div>
           </div>
           <div className="pt-2">
-            <label className="text-xs font-bold text-slate-400" htmlFor="set-bpm">Set BPM</label>
+            <label className="text-xs font-bold text-slate-400" htmlFor="set-bpm">
+              Set BPM
+            </label>
             <input
               type="number"
               min="20"

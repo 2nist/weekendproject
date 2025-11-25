@@ -9,14 +9,31 @@ function copyFileToLibrary(userDataPath, srcPath, destSubDir, metadata) {
   const pathConfig = getPathConfig();
   const ext = path.extname(srcPath);
 
-  // Get the appropriate directory based on file type
-  const destDir = pathConfig.getPath(destSubDir);
+  // Get/construct appropriate directory based on file type; prefer explicit userDataPath when passed
+  let destDir;
+  if (userDataPath) {
+    const userLib = path.join(userDataPath, 'library');
+    const localDir = path.join(userLib, destSubDir);
+    if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+    destDir = localDir;
+  } else {
+    destDir = pathConfig.getPath(destSubDir);
+  }
 
-  // Generate organized filename
-  const destFilename = pathConfig.generateFilename(
-    { ...metadata, uuid: metadata.uuid || randomUUID() },
-    ext,
-  );
+  // Generate organized filename, falling back to pathConfig helper when available
+  let destFilename;
+  try {
+    if (pathConfig && typeof pathConfig.generateFilename === 'function') {
+      destFilename = pathConfig.generateFilename(
+        { ...metadata, uuid: metadata.uuid || randomUUID() },
+        ext,
+      );
+    } else {
+      destFilename = `${metadata.uuid || randomUUID()}-${Date.now()}-${path.basename(srcPath)}`;
+    }
+  } catch (err) {
+    destFilename = `${metadata.uuid || randomUUID()}-${Date.now()}-${path.basename(srcPath)}`;
+  }
   const destPath = path.join(destDir, destFilename);
 
   // Copy to primary location
@@ -35,7 +52,7 @@ function copyFileToLibrary(userDataPath, srcPath, destSubDir, metadata) {
  * @param {string} userDataPath
  * @param {object} payload
  */
-function createProject(userDataPath, payload) {
+async function createProject(userDataPath, payload) {
   const uuid = randomUUID();
   const title = payload.title || path.basename(payload.audioPath || payload.midiPath || 'untitled');
   const artist = payload.artist || '';
@@ -73,6 +90,25 @@ function createProject(userDataPath, payload) {
       metadata,
       status,
     });
+
+    // After creating project, try to fetch lyrics (non-fatal) & persist
+    try {
+      const lyrics = require('./lyrics');
+      if (lyrics && typeof lyrics.fetchLyrics === 'function') {
+        const duration = (metadata && metadata.duration_seconds) || null;
+        const lr = await lyrics.fetchLyrics(artist, title, metadata.album || null, duration);
+        if (lr && id) {
+          const success = db.updateProjectLyrics(id, JSON.stringify(lr));
+          if (!success) {
+            logger.warn('[Library] updateProjectLyrics returned false for id', id);
+          } else {
+            logger.info('[Library] updateProjectLyrics saved lyrics for project id', id);
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn('[Library] failed to auto-fetch lyrics:', err?.message || err);
+    }
 
     return {
       success: true,

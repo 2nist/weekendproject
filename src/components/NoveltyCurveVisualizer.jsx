@@ -1,11 +1,16 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { findSignificantPeaks, computeThreshold } from '@/utils/novelty';
 
 /**
  * NoveltyCurveVisualizer
  * Renders the structural novelty curve with peaks & current section boundaries.
  * Clicking on the graph sends a manual split IPC request (prototype).
  */
-export default function NoveltyCurveVisualizer({ structuralMap }) {
+export default function NoveltyCurveVisualizer({
+  structuralMap,
+  detectionMethod = 'mad',
+  detectionParam = 1.5,
+}) {
   const curve = structuralMap?.debug?.noveltyCurve || structuralMap?.debug?.novelty_curve || [];
   const sections = structuralMap?.sections || [];
   const [lastSplit, setLastSplit] = useState(null);
@@ -31,6 +36,22 @@ export default function NoveltyCurveVisualizer({ structuralMap }) {
       })
       .join(' ');
   }, [curve, maxVal]);
+
+  const significantPeaks = useMemo(() => {
+    try {
+      return findSignificantPeaks(curve, detectionMethod, detectionParam);
+    } catch (e) {
+      return [];
+    }
+  }, [curve, detectionMethod, detectionParam]);
+
+  const thresholdVal = useMemo(() => {
+    try {
+      return computeThreshold(curve, detectionMethod, detectionParam);
+    } catch (e) {
+      return 0;
+    }
+  }, [curve, detectionMethod, detectionParam]);
 
   const handleClick = async (evt) => {
     if (!svgRef.current || !curve.length) return;
@@ -73,6 +94,34 @@ export default function NoveltyCurveVisualizer({ structuralMap }) {
             strokeWidth="2"
             vectorEffect="non-scaling-stroke"
           />
+          {significantPeaks.map((idx) => {
+            const x = (idx / (curve.length - 1)) * 800;
+            const y = 160 - (curve[idx] / maxVal) * (160 - 20) - 10;
+            return (
+              <g key={`sig-peak-${idx}`}>
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={4}
+                  fill="#ff7b72"
+                  stroke="#fff"
+                  strokeWidth={0.5}
+                  onClick={async (evt) => {
+                    evt.stopPropagation();
+                    try {
+                      if (window?.electronAPI?.invoke) {
+                        await window.electronAPI.invoke('ARCHITECT:FORCE_SPLIT', { frame: idx });
+                      }
+                      setLastSplit(idx);
+                    } catch (e) {
+                      console.warn('Split invoke failed', e);
+                    }
+                  }}
+                />
+                <title>Significant novelty peak — click to stage split at frame {idx}</title>
+              </g>
+            );
+          })}
           {boundaries.map((b, i) => {
             const x = (b / (curve.length - 1)) * 800;
             return (
@@ -100,6 +149,37 @@ export default function NoveltyCurveVisualizer({ structuralMap }) {
               </g>
             );
           })}
+          {/* Threshold Line */}
+          {curve.length > 0 &&
+            thresholdVal > 0 &&
+            (() => {
+              const H = 160;
+              const thresholdY = 160 - (thresholdVal / maxVal) * (H - 20) - 10;
+              return (
+                <g>
+                  <line
+                    x1={0}
+                    x2={800}
+                    y1={thresholdY}
+                    y2={thresholdY}
+                    stroke="#ffb86b"
+                    strokeWidth={1}
+                    strokeDasharray="4 4"
+                    opacity={0.8}
+                  />
+                  <text
+                    x={10}
+                    y={14}
+                    fontSize="10"
+                    fill="#ffb86b"
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    {`Threshold: ${thresholdVal.toFixed(3)} (${detectionMethod} ${detectionParam})`}
+                  </text>
+                </g>
+              );
+            })()}
+          )}
         </svg>
         {!curve.length && (
           <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-500">
@@ -108,7 +188,8 @@ export default function NoveltyCurveVisualizer({ structuralMap }) {
         )}
       </div>
       <p className="text-[10px] leading-relaxed text-slate-500">
-        Peaks in similarity change drive boundary proposals. Click anywhere to stage a manual split (prototype only).
+        Peaks in similarity change drive boundary proposals. Click anywhere to stage a manual split
+        (prototype only).
       </p>
     </div>
   );
